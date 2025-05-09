@@ -37,6 +37,7 @@ downloads/
 *.pt
 *.pt.1
 *.mp3
+yolov5/
 
 # Jupyter Notebook
 .ipynb_checkpoints
