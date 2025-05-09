@@ -5,24 +5,27 @@ from yolov5.models.common import DetectMultiBackend
 from yolov5.utils.general import check_img_size, non_max_suppression, scale_boxes
 from yolov5.utils.torch_utils import select_device
 from .base_model import BaseModel
+from ..config.settings import PATHS, MODEL_SETTINGS
 
 class YOLOv5Model(BaseModel):
     """YOLOv5 model implementation."""
     
     def __init__(self):
-        """Initialize YOLOv5 model.
-        
-        Args:
-            model_path (str, optional): Path to the model weights. If None, uses YOLOv5s.
-        """
+        """Initialize YOLOv5 model."""
         # Load YOLOv5 model
-        model_path = 'models/weights/yolov5s.pt'
+        model_path = PATHS['models']['yolov5']
+        settings = MODEL_SETTINGS['yolov5']
         
         self.device = select_device('')
         self.model = DetectMultiBackend(model_path, device=self.device)
         self.stride = self.model.stride
         self.names = self.model.names
-        self.imgsz = check_img_size((640, 640), s=self.stride)
+        self.imgsz = check_img_size(settings['image_size'], s=self.stride)
+        
+        # Store settings for inference
+        self.conf = settings['confidence_threshold']
+        self.iou = settings['iou_threshold']
+        self.max_det = settings['max_detections']
         
     def detect(self, frame):
         """Detect objects in a frame using YOLOv5.
@@ -48,7 +51,7 @@ class YOLOv5Model(BaseModel):
             
         # Inference
         pred = self.model(img, augment=False, visualize=False)
-        pred = non_max_suppression(pred, 0.25, 0.45, None, False, max_det=1000)
+        pred = non_max_suppression(pred, self.conf, self.iou, None, False, max_det=self.max_det)
         
         detections = []
         for i, det in enumerate(pred):

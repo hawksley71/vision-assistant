@@ -3,17 +3,20 @@ import os
 from datetime import datetime, timedelta
 import random
 from dateutil.relativedelta import relativedelta
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from src.config.settings import PATHS, LOGGING_SETTINGS
 
 OBJECTS = ["bus", "truck", "car", "person", "dog", "cat", "bicycle", "motorcycle", "traffic light", "stop sign"]
 
 start_date = datetime(2025, 4, 24)
 end_date = datetime(2025, 5, 7)
-log_dir = "data/raw"
+log_dir = PATHS['data']['raw']
 os.makedirs(log_dir, exist_ok=True)
 
 for i in range((end_date - start_date).days + 1):
     day = start_date + timedelta(days=i)
-    filename = os.path.join(log_dir, f"detections_{day.strftime('%Y%m%d')}.csv")
+    filename = os.path.join(log_dir, f"detections_{day.strftime(LOGGING_SETTINGS['log_format'])}.csv")
     with open(filename, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -43,7 +46,7 @@ for m in range(11):
     month = month_start + relativedelta(months=m)
     # Pick the 15th of each month for the log
     log_day = month.replace(day=15)
-    filename = os.path.join(log_dir, f"detections_{log_day.strftime('%Y%m%d')}.csv")
+    filename = os.path.join(log_dir, f"detections_{log_day.strftime(LOGGING_SETTINGS['log_format'])}.csv")
     with open(filename, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([

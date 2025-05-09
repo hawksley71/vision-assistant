@@ -12,6 +12,7 @@ import re
 import pandas as pd
 import requests
 from dotenv import load_dotenv
+from ..config.settings import PATHS, CAMERA_SETTINGS, LOGGING_SETTINGS, AUDIO_SETTINGS, HOME_ASSISTANT
 
 load_dotenv()
 HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN")
@@ -20,9 +21,9 @@ class DetectionAssistant:
     def __init__(self):
         # Initialize camera
         self.cap = cv2.VideoCapture(0)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_SETTINGS['width'])
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_SETTINGS['height'])
+        self.cap.set(cv2.CAP_PROP_FPS, CAMERA_SETTINGS['fps'])
         if not self.cap.isOpened():
             raise RuntimeError("Error: Could not open camera")
 
@@ -32,7 +33,7 @@ class DetectionAssistant:
         self.fps = 0
 
         # For logging
-        self.log_path = os.path.join("data", "raw", f"detections_{datetime.now().strftime('%Y%m%d')}.csv")
+        self.log_path = os.path.join(PATHS['data']['raw'], f"detections_{datetime.now().strftime(LOGGING_SETTINGS['log_format'])}.csv")
         self.last_log_time = time.time()
         self.detections_buffer = []  # Store detections for the current 1s interval
         # Write header if file does not exist

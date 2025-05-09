@@ -3,21 +3,19 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 from .base_model import BaseModel
+from ..config.settings import PATHS, MODEL_SETTINGS
 
 class YOLOv8Model(BaseModel):
     """YOLOv8 model implementation."""
     
     def __init__(self):
-        """Initialize YOLOv8 model.
-        
-        Args:
-            model_path (str, optional): Path to the model weights. If None, uses YOLOv8n.
-        """
+        """Initialize YOLOv8 model."""
         # Load YOLOv8 model
-        model_path = 'models/weights/yolov8n.pt'  # Use nano model by default
+        model_path = PATHS['models']['yolov8']
+        settings = MODEL_SETTINGS['yolov8']
         
         # Initialize model with GPU support
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = settings['device'] if torch.cuda.is_available() else 'cpu'
         self.model = YOLO(model_path)
         
         # Set model parameters for faster inference
@@ -26,10 +24,10 @@ class YOLOv8Model(BaseModel):
             self.model.to(self.device)
             self.model.model.half()  # Use half precision
         
-        # Set inference parameters
-        self.conf = 0.25  # Confidence threshold
-        self.iou = 0.45   # NMS IoU threshold
-        self.max_det = 20  # Maximum detections per frame
+        # Set inference parameters from config
+        self.conf = settings['confidence_threshold']
+        self.iou = settings['iou_threshold']
+        self.max_det = settings['max_detections']
         
     def detect(self, frame):
         """Detect objects in a frame using YOLOv8.
