@@ -1,0 +1,11 @@
+timestamp,label_1,count_1,avg_conf_1,label_2,count_2,avg_conf_2,label_3,count_3,avg_conf_3
+2024-05-15 07:02:00,bus,4,0.74,stop sign,3,0.95,traffic light,1,0.7
+2024-05-15 15:19:00,motorcycle,2,0.87,truck,2,0.67,,,
+2024-05-15 17:38:00,cat,2,0.54,traffic light,3,0.76,,,
+2024-05-15 04:34:00,dog,5,0.95,,,,,,
+2024-05-15 20:39:00,motorcycle,5,0.89,bus,2,0.52,,,
+2024-05-15 00:54:00,dog,1,0.62,,,,,,
+2024-05-15 14:39:00,bicycle,4,0.83,person,4,0.96,cat,4,0.73
+2024-05-15 20:43:00,dog,5,0.88,person,2,0.77,traffic light,5,0.86
+2024-05-15 08:42:00,bus,5,0.86,person,5,0.61,,,
+2024-05-15 05:21:00,person,2,0.67,,,,,,

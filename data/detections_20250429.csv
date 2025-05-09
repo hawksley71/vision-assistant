@@ -1,0 +1,11 @@
+timestamp,label_1,count_1,avg_conf_1,label_2,count_2,avg_conf_2,label_3,count_3,avg_conf_3
+2025-04-29 06:21:00,car,5,0.99,motorcycle,3,0.62,,,
+2025-04-29 05:27:00,bus,4,0.57,stop sign,5,0.66,motorcycle,2,0.92
+2025-04-29 08:10:00,traffic light,3,0.95,truck,5,0.85,person,5,0.93
+2025-04-29 01:45:00,cat,1,0.82,dog,5,0.6,traffic light,3,0.96
+2025-04-29 15:51:00,bicycle,2,0.87,motorcycle,4,0.93,car,5,0.55
+2025-04-29 21:07:00,bus,3,0.65,dog,4,1.0,,,
+2025-04-29 23:44:00,motorcycle,5,0.8,,,,,,
+2025-04-29 14:30:00,cat,1,0.71,truck,5,0.65,car,3,0.83
+2025-04-29 13:04:00,stop sign,2,0.69,person,5,0.83,car,3,0.91
+2025-04-29 17:08:00,person,5,0.97,motorcycle,4,0.71,bus,4,0.67

@@ -1,0 +1,92 @@
+import speech_recognition as sr
+from gtts import gTTS
+import pandas as pd
+import os
+from datetime import datetime
+import re
+
+# Load all detection logs
+log_dir = "data"
+log_files = sorted([f for f in os.listdir(log_dir) if f.endswith(".csv")])
+if not log_files:
+    print("No detection logs found.")
+    exit()
+
+dfs = []
+for f in log_files:
+    df = pd.read_csv(os.path.join(log_dir, f))
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    dfs.append(df)
+
+df_all = pd.concat(dfs).sort_values("timestamp")
+
+# Setup microphone and recognizer
+r = sr.Recognizer()
+mic = sr.Microphone()
+
+print("Ask: 'Did you see a [thing]?', 'When did you last see [thing]?', or 'What was the first thing you saw?'. Say 'exit' to quit.")
+
+while True:
+    try:
+        with mic as source:
+            r.adjust_for_ambient_noise(source)
+            print("Listening...")
+            audio = r.listen(source, timeout=5)
+
+        query = r.recognize_google(audio).lower()
+        print("You said:", query)
+
+        # Exit triggers
+        if any(word in query for word in ["exit", "quit", "stop", "cancel"]):
+            print("Exiting.")
+            break
+
+        message = "Sorry, I didn't understand that."
+
+        # "Did you see a..." pattern
+        match_see = re.search(r"did you see (?:a |an |any )?([\w\s]+)\??", query)
+        if match_see:
+            label = match_see.group(1).strip().lower()
+            matches = df_all[df_all['label'].str.lower() == label]
+            if not matches.empty:
+                first_time = matches.iloc[0]['timestamp']
+                spoken_time = first_time.strftime("%I:%M %p on %B %d").lstrip("0")
+                message = f"Yes, I saw {label} at {spoken_time}."
+            else:
+                message = f"No, I did not see {label}."
+
+        # "When did you last see..." pattern
+        match_last = re.search(r"when did you (?:last )?see (?:a |an )?([\w\s]+)\??", query)
+        if match_last:
+            label = match_last.group(1).strip().lower()
+            matches = df_all[df_all['label'].str.lower() == label]
+            if not matches.empty:
+                last_time = matches.iloc[-1]['timestamp']
+                spoken_time = last_time.strftime("%I:%M %p on %B %d").lstrip("0")
+                message = f"The last time I saw {label} was at {spoken_time}."
+            else:
+                message = f"I never saw {label}."
+
+        # "What was the first thing you saw?" pattern
+        if "what was the first thing you saw" in query:
+            if not df_all.empty:
+                first_row = df_all.iloc[0]
+                label = first_row['label']
+                first_time = first_row['timestamp']
+                spoken_time = first_time.strftime("%I:%M %p on %B %d").lstrip("0")
+                message = f"The first thing I saw was {label} at {spoken_time}."
+            else:
+                message = "I haven't seen anything yet."
+
+        print("Responding:", message)
+        tts = gTTS(message)
+        tts.save("response.mp3")
+        os.system("mpv response.mp3")
+
+    except sr.WaitTimeoutError:
+        print("No speech detected. Try again...")
+    except sr.UnknownValueError:
+        print("Sorry, could not understand.")
+    except KeyboardInterrupt:
+        print("\nInterrupted. Exiting.")
+        break
