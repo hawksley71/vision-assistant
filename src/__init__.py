@@ -1,1 +1,3 @@
-"""Source code for object detection and voice interaction.""" 
+"""
+Vision-Aware Smart Assistant package.
+""" 

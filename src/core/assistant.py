@@ -3,7 +3,7 @@ import time
 from collections import Counter, defaultdict
 import csv
 from datetime import datetime, timedelta
-from models.yolov8_model import YOLOv8Model
+from src.models.yolov8_model import YOLOv8Model
 import os
 import threading
 import speech_recognition as sr

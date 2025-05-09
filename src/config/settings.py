@@ -87,13 +87,14 @@ HOME_ASSISTANT = {
 def create_directories():
     """
     Create all required directories if they don't exist.
-    
     This function is called automatically when the module is imported.
     It ensures all necessary directories for data, models, outputs, and assets exist.
     """
     for category in PATHS.values():
         for path in category.values():
-            os.makedirs(path, exist_ok=True)
+            # Only create if path does not look like a file (no extension)
+            if not os.path.splitext(path)[1]:
+                os.makedirs(path, exist_ok=True)
 
 # Initialize directories when module is imported
 create_directories()
