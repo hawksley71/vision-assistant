@@ -34,10 +34,16 @@ ENV/
 # Project specific
 outputs/
 downloads/
-*.pt
-*.pt.1
-*.mp3
+models/weights/*.pt
+assets/audio/*.mp3
 yolov5/
+
+# Data and logs
+data/raw/
+data/processed/
+data/logs/
+outputs/detections/
+outputs/logs/
 
 # Jupyter Notebook
 .ipynb_checkpoints
