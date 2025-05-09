@@ -8,7 +8,7 @@ OBJECTS = ["bus", "truck", "car", "person", "dog", "cat", "bicycle", "motorcycle
 
 start_date = datetime(2025, 4, 24)
 end_date = datetime(2025, 5, 7)
-log_dir = "data"
+log_dir = "data/raw"
 os.makedirs(log_dir, exist_ok=True)
 
 for i in range((end_date - start_date).days + 1):

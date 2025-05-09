@@ -7,14 +7,14 @@ from .base_model import BaseModel
 class YOLOv8Model(BaseModel):
     """YOLOv8 model implementation."""
     
-    def __init__(self, model_path=None):
+    def __init__(self):
         """Initialize YOLOv8 model.
         
         Args:
             model_path (str, optional): Path to the model weights. If None, uses YOLOv8n.
         """
-        if model_path is None:
-            model_path = 'yolov8n.pt'  # Use nano model by default
+        # Load YOLOv8 model
+        model_path = 'models/weights/yolov8n.pt'  # Use nano model by default
         
         # Initialize model with GPU support
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'

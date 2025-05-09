@@ -9,15 +9,15 @@ from .base_model import BaseModel
 class YOLOv5Model(BaseModel):
     """YOLOv5 model implementation."""
     
-    def __init__(self, model_path=None):
+    def __init__(self):
         """Initialize YOLOv5 model.
         
         Args:
             model_path (str, optional): Path to the model weights. If None, uses YOLOv5s.
         """
-        if model_path is None:
-            model_path = 'yolov5s.pt'
-            
+        # Load YOLOv5 model
+        model_path = 'models/weights/yolov5s.pt'
+        
         self.device = select_device('')
         self.model = DetectMultiBackend(model_path, device=self.device)
         self.stride = self.model.stride

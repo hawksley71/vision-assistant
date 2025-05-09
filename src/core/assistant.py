@@ -32,11 +32,12 @@ class DetectionAssistant:
         self.fps = 0
 
         # For logging
-        self.log_path = os.path.join("data", f"detections_{datetime.now().strftime('%Y%m%d')}.csv")
+        self.log_path = os.path.join("data", "raw", f"detections_{datetime.now().strftime('%Y%m%d')}.csv")
         self.last_log_time = time.time()
         self.detections_buffer = []  # Store detections for the current 1s interval
         # Write header if file does not exist
         if not os.path.exists(self.log_path):
+            os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
             with open(self.log_path, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
@@ -240,7 +241,7 @@ class DetectionAssistant:
                     message = self.summarize_buffer_labels()
                 else:
                     # Historical queries from log
-                    def load_all_logs(log_dir="data"):
+                    def load_all_logs(log_dir="data/raw"):
                         all_dfs = []
                         log_files = sorted([f for f in os.listdir(log_dir) if f.endswith(".csv")])
                         for f in log_files:
@@ -424,8 +425,8 @@ class DetectionAssistant:
                 except Exception as e:
                     print(f"[DEBUG] Could not send message to Home Assistant: {e}")
                 tts = gTTS(message)
-                tts.save("response.mp3")
-                os.system("mpv response.mp3")
+                tts.save("assets/audio/response.mp3")
+                os.system("mpv assets/audio/response.mp3")
             except sr.WaitTimeoutError:
                 print("No speech detected. Try again...")
             except sr.UnknownValueError:
@@ -437,12 +438,11 @@ class DetectionAssistant:
         # Wait 3 seconds while detection buffer fills
         print("Warming up, please wait...")
         time.sleep(3)
-        # Speak introduction message
-        intro_message = ("Hello! I'm ready to help. You can ask me what I'm seeing, "
-                         "or about my confidence, or about objects I've seen in the past.")
-        tts = gTTS(intro_message)
-        tts.save("intro.mp3")
-        os.system("mpv intro.mp3")
+        # Generate and play intro
+        intro_text = "Hello! I am your vision-aware assistant. I can see and detect objects in my view. Ask me what I see, or about past detections."
+        tts = gTTS(text=intro_text, lang='en')
+        tts.save("assets/audio/intro.mp3")
+        os.system("mpv assets/audio/intro.mp3")
         self.voice_thread.start()
 
     def run(self):
