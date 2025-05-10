@@ -1,3 +1,12 @@
+import os
+# Suppress ALSA and other audio library warnings
+os.environ["PYTHONWARNINGS"] = "ignore"
+try:
+    import ctypes
+    asound = ctypes.cdll.LoadLibrary('libasound.so')
+    asound.snd_lib_error_set_handler(None)
+except Exception:
+    pass
 import cv2
 import time
 from collections import Counter, defaultdict
@@ -13,9 +22,14 @@ import pandas as pd
 import requests
 from dotenv import load_dotenv
 from ..config.settings import PATHS, CAMERA_SETTINGS, LOGGING_SETTINGS, AUDIO_SETTINGS, HOME_ASSISTANT
+import json
+import random
+import difflib
 
 load_dotenv()
 HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN")
+
+HEADLESS = os.environ.get("VISION_ASSISTANT_HEADLESS", "0") == "1"
 
 class DetectionAssistant:
     def __init__(self):
@@ -86,6 +100,15 @@ class DetectionAssistant:
         # Clear buffer
         self.detections_buffer = []
 
+    def natural_list(self, items):
+        if not items:
+            return ""
+        if len(items) == 1:
+            return items[0]
+        if len(items) == 2:
+            return f"{items[0]} and {items[1]}"
+        return ", ".join(items[:-1]) + f", and {items[-1]}"
+
     def summarize_buffer_labels(self):
         # Only return the top 1-3 labels (no confidence or count)
         if not self.detections_buffer:
@@ -99,12 +122,34 @@ class DetectionAssistant:
             conf = det['confidence']
             label_counts[label] += 1
             label_confidences[label].append(conf)
-        top_labels = [label for label, _ in label_counts.most_common(3)]
-        self.last_reported_labels = top_labels
-        self.last_reported_confidences = {label: label_confidences[label] for label in top_labels}
-        if not top_labels:
+        # Compute average confidence for each label
+        avg_confidences = {label: sum(confs)/len(confs) for label, confs in label_confidences.items()}
+        # Sort labels by average confidence, descending
+        sorted_labels = sorted(avg_confidences.items(), key=lambda x: x[1], reverse=True)
+        # Only keep top 3
+        sorted_labels = sorted_labels[:3]
+        self.last_reported_labels = [label for label, _ in sorted_labels]
+        self.last_reported_confidences = {label: label_confidences[label] for label, _ in sorted_labels}
+        if not sorted_labels:
             return "I'm not seeing anything right now."
-        return "Right now, I am seeing: " + ", ".join(top_labels) + "."
+        # Low confidence logic
+        low_confidence_threshold = 0.4
+        low_confidence_phrases = [
+            "probably a",
+            "might be a",
+            "may have seen a",
+            "possibly a"
+        ]
+        def label_with_conf(label, conf):
+            percent = int(round(conf * 100))
+            if conf < low_confidence_threshold:
+                phrase = random.choice(low_confidence_phrases)
+                return f"{phrase} {label}"
+            else:
+                return label
+        # Build the list for natural response
+        label_phrases = [label_with_conf(label, conf) for label, conf in sorted_labels]
+        return "Right now, I am seeing: " + self.natural_list(label_phrases) + "."
 
     def summarize_buffer_confidence(self):
         # Report the average confidence for the last reported label(s)
@@ -119,7 +164,8 @@ class DetectionAssistant:
             print(f"[DEBUG] Label: {label}, Confidences: {confs}")
             if confs:
                 avg_conf = sum(confs) / len(confs)
-                parts.append(f"{label}: {avg_conf:.2f}")
+                percent_conf = int(round(avg_conf * 100))
+                parts.append(f"{label}: {percent_conf}%")
         if not parts:
             print("[DEBUG] No confidence information for last detection.")
             return "I don't have confidence information for the last detection."
@@ -176,6 +222,59 @@ class DetectionAssistant:
         # Add more cases as needed
         return None, None
 
+    def find_closest_label(self, partial_label, known_labels):
+        # Use difflib to find the closest match
+        matches = difflib.get_close_matches(partial_label, known_labels, n=1, cutoff=0.6)
+        if matches:
+            return matches[0]
+        return partial_label
+
+    def normalize_object_label(self, label):
+        # Remove leading articles (a, an, the) and extra spaces
+        return re.sub(r'^(a |an |the )', '', label.strip(), flags=re.IGNORECASE)
+
+    def answer_object_time_query(self, obj, time_expr):
+        # Load logs
+        def load_all_logs(log_dir="data/raw"):
+            all_dfs = []
+            log_files = sorted([f for f in os.listdir(log_dir) if f.endswith(".csv")])
+            for f in log_files:
+                try:
+                    df = pd.read_csv(os.path.join(log_dir, f))
+                    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+                    all_dfs.append(df)
+                except Exception as e:
+                    print(f"Warning: Skipped {f} due to read error: {e}")
+            if not all_dfs:
+                return pd.DataFrame(columns=["timestamp", "label_1", "count_1", "avg_conf_1", "label_2", "count_2", "avg_conf_2", "label_3", "count_3", "avg_conf_3"])
+            return pd.concat(all_dfs, ignore_index=True).sort_values("timestamp")
+        df_all = load_all_logs()
+        if df_all.empty:
+            return "I haven't seen anything yet."
+        # Normalize object
+        obj = self.normalize_object_label(obj)
+        # Parse time expression
+        start, end = self.parse_time_expression(time_expr)
+        if start is not None and end is not None:
+            df_filtered = df_all[(df_all['timestamp'] >= start) & (df_all['timestamp'] <= end)]
+        else:
+            df_filtered = df_all
+        # Search for object in filtered logs
+        mask = (
+            df_filtered['label_1'].fillna('').str.lower() == obj or
+            df_filtered['label_2'].fillna('').str.lower() == obj or
+            df_filtered['label_3'].fillna('').str.lower() == obj
+        )
+        matches = df_filtered.loc[mask]
+        if not matches.empty:
+            times = matches['timestamp'].dt.strftime("%I:%M %p on %A").str.lstrip("0").tolist()
+            if len(times) == 1:
+                return f"Yes, I saw {obj} at {times[0]} {('during ' + time_expr) if time_expr else ''}."
+            else:
+                return f"Yes, I saw {obj} {len(times)} times {('during ' + time_expr) if time_expr else ''}: {', '.join(times)}."
+        else:
+            return f"No, I did not see {obj}{' ' + time_expr if time_expr else ''}."
+
     def voice_query_loop(self):
         print("Voice assistant is ready. Ask: 'What are you seeing right now?' or 'Did you see a [thing]?' or 'When did you last see [thing]?' or 'What was the first/last thing you saw?'. Say 'exit' to quit voice mode.")
         # Define regex patterns for each query type
@@ -220,6 +319,57 @@ class DetectionAssistant:
             r"confidence",
             r"sure"
         ]
+        # Add more flexible pattern for follow-up queries about 'that'
+        followup_last_seen_patterns = [
+            r"when (?:did|have)? ?you (?:see|saw|spotted|detect(?:ed)?) (?:that|it|them)? ?(?:last|previously)?",
+            r"when (?:was|is) the last time you (?:saw|spotted|detected) (?:that|it|them)?",
+            r"last time you (?:saw|spotted|detected) (?:that|it|them)?",
+            r"have you (?:seen|spotted|detected) (?:that|it|them)? before"
+        ]
+        # Patterns for 'usual time' and 'frequency' queries
+        usual_time_patterns = [
+            r"when does the ([\w \-]+) usually come",
+            r"what time does the ([\w \-]+) usually come",
+            r"when is the ([\w \-]+) usually here",
+            r"what time does the ([\w \-]+) arrive",
+            r"what time do you usually see the ([\w \-]+)",
+            r"when do you usually see the ([\w \-]+)",
+            r"when is the ([\w \-]+) usually seen",
+            r"when does the ([\w \-]+) show up",
+            r"what time is the ([\w \-]+) usually seen",
+            r"what time does the ([\w \-]+) show up"
+        ]
+        frequency_patterns = [
+            r"how many days a week does the ([\w \-]+) come",
+            r"how often does the ([\w \-]+) come",
+            r"on which days does the ([\w \-]+) come",
+            r"what days does the ([\w \-]+) come",
+            r"which days does the ([\w \-]+) come",
+            r"what days of the week does the ([\w \-]+) come"
+        ]
+        day_of_week_patterns = [
+            r"what day of the week does the ([\w \-]+) come",
+            r"which day does the ([\w \-]+) come",
+            r"what days does the ([\w \-]+) come",
+            r"which days does the ([\w \-]+) come",
+            r"what days of the week does the ([\w \-]+) come"
+        ]
+        day_of_month_patterns = [
+            r"what day of the month does the ([\w \-]+) come",
+            r"which day of the month does the ([\w \-]+) come"
+        ]
+        month_patterns = [
+            r"which months does the ([\w \-]+) come",
+            r"what month does the ([\w \-]+) come"
+        ]
+        weekend_patterns = [
+            r"does the ([\w \-]+) come on weekends?",
+            r"does the ([\w \-]+) come on weekdays?"
+        ]
+        specific_day_patterns = [
+            r"does the ([\w \-]+) come on (monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?"
+        ]
+        pending_time_expr = None
         while self.voice_active:
             try:
                 with self.mic as source:
@@ -229,6 +379,42 @@ class DetectionAssistant:
                 query = self.r.recognize_google(audio).lower()
                 print(f"[DEBUG] Recognized query: {query}")
                 if any(word in query for word in ["exit", "quit", "stop", "cancel"]):
+                    # Exit acknowledgment phrases
+                    exit_phrases = [
+                        "Okay, I am shutting down now. Goodbye!",
+                        "Exiting the assistant. Have a great day!",
+                        "Understood, I'm turning off. See you next time!",
+                        "The assistant is now exiting. Take care!"
+                    ]
+                    exit_message = random.choice(exit_phrases)
+                    print(f"[DEBUG] Exit acknowledged: {exit_message}")
+                    # Send exit message to Home Assistant TTS
+                    def send_tts_to_ha(message):
+                        url = "http://localhost:8123/api/services/tts/cloud_say"
+                        headers = {
+                            "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
+                            "Content-Type": "application/json",
+                        }
+                        payload = {
+                            "entity_id": "media_player.den_speaker",
+                            "message": message,
+                            "language": "en-US",
+                            "cache": False
+                        }
+                        print("[DEBUG] Posting to Home Assistant Cloud TTS (exit):")
+                        print("[DEBUG] URL:", url)
+                        print("[DEBUG] Headers:", headers)
+                        print("[DEBUG] Payload:", json.dumps(payload, indent=2))
+                        try:
+                            response = requests.post(url, headers=headers, json=payload, timeout=10)
+                            print(f"[DEBUG] TTS Response Status: {response.status_code}")
+                            try:
+                                print("[DEBUG] TTS Response JSON:", response.json())
+                            except Exception:
+                                print("[DEBUG] TTS Response Text:", response.text)
+                        except Exception as e:
+                            print(f"[DEBUG] Could not send exit message to Home Assistant: {e}")
+                    threading.Thread(target=send_tts_to_ha, args=(exit_message,), daemon=True).start()
                     print("Exiting voice assistant.")
                     self.voice_active = False
                     break
@@ -240,194 +426,271 @@ class DetectionAssistant:
                 # Live detection query (buffer summary, labels only)
                 elif any(re.search(pattern, query) for pattern in live_patterns):
                     message = self.summarize_buffer_labels()
-                else:
-                    # Historical queries from log
-                    def load_all_logs(log_dir="data/raw"):
-                        all_dfs = []
-                        log_files = sorted([f for f in os.listdir(log_dir) if f.endswith(".csv")])
-                        for f in log_files:
-                            try:
-                                df = pd.read_csv(os.path.join(log_dir, f))
-                                df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
-                                all_dfs.append(df)
-                            except Exception as e:
-                                print(f"Warning: Skipped {f} due to read error: {e}")
-                        if not all_dfs:
-                            return pd.DataFrame(columns=["timestamp", "label_1", "count_1", "avg_conf_1", "label_2", "count_2", "avg_conf_2", "label_3", "count_3", "avg_conf_3"])
-                        return pd.concat(all_dfs, ignore_index=True).sort_values("timestamp")
-                    df_all = load_all_logs()
-                    if df_all.empty:
-                        message = "I haven't seen anything yet."
+                # Check for follow-up queries about 'that'
+                elif any(re.search(pattern, query, re.IGNORECASE) for pattern in followup_last_seen_patterns):
+                    # Use self.last_reported_labels for context
+                    if not self.last_reported_labels:
+                        message = "I'm not sure what 'that' refers to. Please ask what I am seeing first."
                     else:
-                        # Last thing query
-                        for pattern in last_thing_patterns:
-                            if re.search(pattern, query):
-                                print(f"[DEBUG] Matched last_thing_pattern: {pattern}")
-                                # Regex for time expressions
-                                time_expr_regex = r"(today|yesterday|last week|this week|last month|this month|this weekend|last weekend|in (?:january|february|march|april|may|june|july|august|september|october|november|december))"
-                                time_expr_match = re.search(time_expr_regex, query)
-                                found_time = time_expr_match.group(0) if time_expr_match else None
-                                df_filtered = df_all
-                                if found_time:
-                                    start, end = self.parse_time_expression(found_time)
-                                    if start is not None and end is not None:
-                                        df_filtered = df_filtered[(df_filtered['timestamp'] >= start) & (df_filtered['timestamp'] <= end)]
-                                        print(f"[DEBUG] Filtering logs from {start} to {end}")
-                                    else:
-                                        message = f"Sorry, I couldn't understand the time expression '{found_time}'."
-                                        break
-                                if df_filtered.empty:
-                                    message = f"I didn't see anything{(' ' + found_time) if found_time else ''}."
-                                    print(f"[DEBUG] No entries found for last thing query in range: {found_time}")
-                                    break
-                                last_row = df_filtered.iloc[-1]
-                                print(f"[DEBUG] Last row: {last_row}")
-                                for col in ["label_1", "label_2", "label_3"]:
-                                    label = last_row[col]
-                                    print(f"[DEBUG] Checking last label column {col}: {label}")
-                                    if label:
-                                        last_time = last_row['timestamp']
-                                        spoken_time = last_time.strftime("%I:%M %p on %B %d").lstrip("0")
-                                        message = f"The last thing I saw was {label} at {spoken_time}."
-                                        print(f"[DEBUG] Responding with last label: {label}")
-                                        break
+                        # Load logs
+                        def load_all_logs(log_dir="data/raw"):
+                            all_dfs = []
+                            log_files = sorted([f for f in os.listdir(log_dir) if f.endswith(".csv")])
+                            for f in log_files:
+                                try:
+                                    df = pd.read_csv(os.path.join(log_dir, f))
+                                    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+                                    all_dfs.append(df)
+                                except Exception as e:
+                                    print(f"Warning: Skipped {f} due to read error: {e}")
+                            if not all_dfs:
+                                return pd.DataFrame(columns=["timestamp", "label_1", "count_1", "avg_conf_1", "label_2", "count_2", "avg_conf_2", "label_3", "count_3", "avg_conf_3"])
+                            return pd.concat(all_dfs, ignore_index=True).sort_values("timestamp")
+                        df_all = load_all_logs()
+                        responses = []
+                        for label in self.last_reported_labels:
+                            matches = df_all[(df_all['label_1'].str.lower() == label.lower()) |
+                                             (df_all['label_2'].str.lower() == label.lower()) |
+                                             (df_all['label_3'].str.lower() == label.lower())]
+                            if not matches.empty:
+                                last_time = matches.iloc[-1]['timestamp']
+                                spoken_time = last_time.strftime("%I:%M %p on %B %d").lstrip("0")
+                                responses.append(f"The last time I saw {label} was at {spoken_time}.")
+                            else:
+                                responses.append(f"I have not seen {label} before.")
+                        message = " ".join(responses)
+                else:
+                    matched = False
+                    # Usual time queries
+                    for pattern in usual_time_patterns:
+                        m = re.search(pattern, query, re.IGNORECASE)
+                        if m:
+                            obj = self.normalize_object_label(m.group(1).strip())
+                            # Load logs
+                            def load_all_logs(log_dir="data/raw"):
+                                all_dfs = []
+                                log_files = sorted([f for f in os.listdir(log_dir) if f.endswith(".csv")])
+                                for f in log_files:
+                                    try:
+                                        df = pd.read_csv(os.path.join(log_dir, f))
+                                        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+                                        all_dfs.append(df)
+                                    except Exception as e:
+                                        print(f"Warning: Skipped {f} due to read error: {e}")
+                                if not all_dfs:
+                                    return pd.DataFrame(columns=["timestamp", "label_1", "count_1", "avg_conf_1", "label_2", "count_2", "avg_conf_2", "label_3", "count_3", "avg_conf_3"])
+                                return pd.concat(all_dfs, ignore_index=True).sort_values("timestamp")
+                            df_all = load_all_logs()
+                            # Find all timestamps for the object (normalized)
+                            mask = (
+                                df_all['label_1'].fillna('').apply(normalize_label) == obj |
+                                df_all['label_2'].fillna('').apply(normalize_label) == obj |
+                                df_all['label_3'].fillna('').apply(normalize_label) == obj
+                            )
+                            times = df_all.loc[mask, 'timestamp']
+                            if times.empty:
+                                message = f"I have not seen {m.group(1).strip()} before."
+                            else:
+                                # Find most common hour/minute (rounded to nearest 5 min)
+                                rounded_times = times.dt.hour * 60 + (times.dt.minute // 5) * 5
+                                from collections import Counter
+                                most_common = Counter(rounded_times).most_common(2)
+                                spoken_times = []
+                                for t, _ in most_common:
+                                    hour = t // 60
+                                    minute = t % 60
+                                    spoken_times.append(datetime(2000, 1, 1, hour, minute).strftime("%-I:%M %p"))
+                                message = f"The {m.group(1).strip()} usually comes at " + " and ".join(spoken_times) + "."
+                            matched = True
+                            break
+                    # Frequency queries
+                    if not matched:
+                        for pattern in frequency_patterns:
+                            m = re.search(pattern, query, re.IGNORECASE)
+                            if m:
+                                obj = self.normalize_object_label(m.group(1).strip())
+                                if 'df_all' in locals() and not df_all.empty:
+                                    known_labels = set()
+                                    for col in ["label_1", "label_2", "label_3"]:
+                                        known_labels.update(df_all[col].dropna().str.lower().unique())
+                                else:
+                                    known_labels = set()
+                                obj = self.find_closest_label(obj, known_labels)
+                                df_all = load_all_logs()
+                                mask = (
+                                    df_all['label_1'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_2'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_3'].fillna('').apply(normalize_label) == obj
+                                )
+                                times = df_all.loc[mask, 'timestamp']
+                                if times.empty:
+                                    message = f"I have not seen {m.group(1).strip()} before."
+                                else:
+                                    df = df_all.loc[mask].copy()
+                                    df['week'] = df['timestamp'].dt.isocalendar().week
+                                    df['year'] = df['timestamp'].dt.year
+                                    days_per_week = df.groupby(['year', 'week'])['timestamp'].apply(lambda x: x.dt.date.nunique())
+                                    avg_days = days_per_week.mean()
+                                    most_common_days = int(round(days_per_week.mode().iloc[0])) if not days_per_week.mode().empty else int(round(avg_days))
+                                    message = f"The {m.group(1).strip()} comes about {most_common_days} day{'s' if most_common_days != 1 else ''} per week."
+                                matched = True
                                 break
-                        # First thing query
-                        for pattern in first_thing_patterns:
-                            if re.search(pattern, query):
-                                print(f"[DEBUG] Matched first_thing_pattern: {pattern}")
-                                # Regex for time expressions
-                                time_expr_regex = r"(today|yesterday|last week|this week|last month|this month|this weekend|last weekend|in (?:january|february|march|april|may|june|july|august|september|october|november|december))"
-                                time_expr_match = re.search(time_expr_regex, query)
-                                found_time = time_expr_match.group(0) if time_expr_match else None
-                                df_filtered = df_all
-                                if found_time:
-                                    start, end = self.parse_time_expression(found_time)
-                                    if start is not None and end is not None:
-                                        df_filtered = df_filtered[(df_filtered['timestamp'] >= start) & (df_filtered['timestamp'] <= end)]
-                                        print(f"[DEBUG] Filtering logs from {start} to {end}")
-                                    else:
-                                        message = f"Sorry, I couldn't understand the time expression '{found_time}'."
-                                        break
-                                if df_filtered.empty:
-                                    message = f"I didn't see anything{(' ' + found_time) if found_time else ''}."
-                                    print(f"[DEBUG] No entries found for first thing query in range: {found_time}")
-                                    break
-                                first_row = df_filtered.iloc[0]
-                                print(f"[DEBUG] First row: {first_row}")
-                                for col in ["label_1", "label_2", "label_3"]:
-                                    label = first_row[col]
-                                    print(f"[DEBUG] Checking first label column {col}: {label}")
-                                    if label:
-                                        first_time = first_row['timestamp']
-                                        spoken_time = first_time.strftime("%I:%M %p on %B %d").lstrip("0")
-                                        message = f"The first thing I saw was {label} at {spoken_time}."
-                                        print(f"[DEBUG] Responding with first label: {label}")
-                                        break
+                    # Day of week queries
+                    if not matched:
+                        for pattern in day_of_week_patterns:
+                            m = re.search(pattern, query, re.IGNORECASE)
+                            if m:
+                                obj = self.normalize_object_label(m.group(1).strip())
+                                df_all = load_all_logs()
+                                mask = (
+                                    df_all['label_1'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_2'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_3'].fillna('').apply(normalize_label) == obj
+                                )
+                                times = df_all.loc[mask, 'timestamp']
+                                if times.empty:
+                                    message = f"I have not seen {m.group(1).strip()} before."
+                                else:
+                                    days = times.dt.day_name().value_counts().index.tolist()
+                                    message = f"The {m.group(1).strip()} usually comes on " + ", ".join(days) + "."
+                                matched = True
                                 break
-                        # Did you see ...
-                        else:
-                            found = False
-                            # List of supported time expressions
-                            time_expressions = [
-                                "today", "yesterday", "last week", "this week", "last month", "this month",
-                                "this weekend", "last weekend"
-                            ] + [f"in {month}" for month in [
-                                "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"
-                            ]]
-                            for pattern in did_you_see_patterns:
-                                match_see = re.search(pattern, query)
-                                if match_see:
-                                    label_time = match_see.group(1).strip().lower()
-                                    # Regex for time expressions
-                                    time_expr_regex = r"(today|yesterday|last week|this week|last month|this month|this weekend|last weekend|in (?:january|february|march|april|may|june|july|august|september|october|november|december))"
-                                    time_expr_match = re.search(time_expr_regex, query)
-                                    found_time = time_expr_match.group(0) if time_expr_match else None
-                                    if found_time:
-                                        # Remove the time expression from the label if present
-                                        label = re.sub(time_expr_regex, '', label_time).strip()
-                                        time_expr = found_time
+                    # Day of month queries
+                    if not matched:
+                        for pattern in day_of_month_patterns:
+                            m = re.search(pattern, query, re.IGNORECASE)
+                            if m:
+                                obj = self.normalize_object_label(m.group(1).strip())
+                                df_all = load_all_logs()
+                                mask = (
+                                    df_all['label_1'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_2'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_3'].fillna('').apply(normalize_label) == obj
+                                )
+                                times = df_all.loc[mask, 'timestamp']
+                                if times.empty:
+                                    message = f"I have not seen {m.group(1).strip()} before."
+                                else:
+                                    days = times.dt.day.value_counts().index.tolist()
+                                    message = f"The {m.group(1).strip()} usually comes on day(s) " + ", ".join(str(d) for d in days) + " of the month."
+                                matched = True
+                                break
+                    # Month queries
+                    if not matched:
+                        for pattern in month_patterns:
+                            m = re.search(pattern, query, re.IGNORECASE)
+                            if m:
+                                obj = self.normalize_object_label(m.group(1).strip())
+                                df_all = load_all_logs()
+                                mask = (
+                                    df_all['label_1'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_2'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_3'].fillna('').apply(normalize_label) == obj
+                                )
+                                times = df_all.loc[mask, 'timestamp']
+                                if times.empty:
+                                    message = f"I have not seen {m.group(1).strip()} before."
+                                else:
+                                    months = times.dt.month_name().value_counts().index.tolist()
+                                    message = f"The {m.group(1).strip()} usually comes in " + ", ".join(months) + "."
+                                matched = True
+                                break
+                    # Weekend/weekday queries
+                    if not matched:
+                        for pattern in weekend_patterns:
+                            m = re.search(pattern, query, re.IGNORECASE)
+                            if m:
+                                obj = self.normalize_object_label(m.group(1).strip())
+                                df_all = load_all_logs()
+                                mask = (
+                                    df_all['label_1'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_2'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_3'].fillna('').apply(normalize_label) == obj
+                                )
+                                times = df_all.loc[mask, 'timestamp']
+                                if times.empty:
+                                    message = f"I have not seen {m.group(1).strip()} before."
+                                else:
+                                    if 'weekend' in m.group(0):
+                                        weekend_days = times[times.dt.weekday >= 5]
+                                        if not weekend_days.empty:
+                                            message = f"Yes, the {m.group(1).strip()} comes on weekends."
+                                        else:
+                                            message = f"No, the {m.group(1).strip()} does not come on weekends."
                                     else:
-                                        label = label_time
-                                        time_expr = None
-                                    print(f"[DEBUG] Did you see: label='{label}', time_expr='{time_expr}'")
-                                    # Filter DataFrame by time expression if present
-                                    df_filtered = df_all
-                                    if time_expr:
-                                        start, end = self.parse_time_expression(time_expr)
-                                        if start is not None and end is not None:
-                                            df_filtered = df_filtered[(df_filtered['timestamp'] >= start) & (df_filtered['timestamp'] <= end)]
-                                            print(f"[DEBUG] Filtering logs from {start} to {end}")
+                                        weekday_days = times[times.dt.weekday < 5]
+                                        if not weekday_days.empty:
+                                            message = f"Yes, the {m.group(1).strip()} comes on weekdays."
                                         else:
-                                            message = f"Sorry, I couldn't understand the time expression '{time_expr}'."
-                                            found = True
-                                            break
-                                    matches = df_filtered[(df_filtered['label_1'].str.lower() == label) |
-                                                         (df_filtered['label_2'].str.lower() == label) |
-                                                         (df_filtered['label_3'].str.lower() == label)]
-                                    if not matches.empty:
-                                        first_time = matches.iloc[0]['timestamp']
-                                        spoken_time = first_time.strftime("%I:%M %p on %B %d").lstrip("0")
-                                        message = f"Yes, I saw {label} at {spoken_time}."
+                                            message = f"No, the {m.group(1).strip()} does not come on weekdays."
+                                matched = True
+                                break
+                    # Specific day queries (yes/no)
+                    if not matched:
+                        for pattern in specific_day_patterns:
+                            m = re.search(pattern, query, re.IGNORECASE)
+                            if m:
+                                obj = self.normalize_object_label(m.group(1).strip())
+                                day = m.group(2).capitalize()
+                                df_all = load_all_logs()
+                                mask = (
+                                    df_all['label_1'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_2'].fillna('').apply(normalize_label) == obj |
+                                    df_all['label_3'].fillna('').apply(normalize_label) == obj
+                                )
+                                times = df_all.loc[mask, 'timestamp']
+                                if times.empty:
+                                    message = f"I have not seen {m.group(1).strip()} before."
+                                else:
+                                    if day in times.dt.day_name().unique():
+                                        message = f"Yes, the {m.group(1).strip()} comes on {day}s."
                                     else:
-                                        message = f"No, I did not see {label}{' ' + time_expr if time_expr else ''}."
-                                    found = True
-                                    break
-                            if not found:
-                                # When did you last see ...
-                                for pattern in last_seen_patterns:
-                                    match_last = re.search(pattern, query)
-                                    if match_last:
-                                        label_time = match_last.group(1).strip().lower()
-                                        time_expr_match = re.search(time_expr_regex, query)
-                                        found_time = time_expr_match.group(0) if time_expr_match else None
-                                        if found_time:
-                                            label = re.sub(time_expr_regex, '', label_time).strip()
-                                            time_expr = found_time
-                                        else:
-                                            label = label_time
-                                            time_expr = None
-                                        print(f"[DEBUG] Last seen: label='{label}', time_expr='{time_expr}'")
-                                        df_filtered = df_all
-                                        if time_expr:
-                                            start, end = self.parse_time_expression(time_expr)
-                                            if start is not None and end is not None:
-                                                df_filtered = df_filtered[(df_filtered['timestamp'] >= start) & (df_filtered['timestamp'] <= end)]
-                                                print(f"[DEBUG] Filtering logs from {start} to {end}")
-                                            else:
-                                                message = f"Sorry, I couldn't understand the time expression '{time_expr}'."
-                                                break
-                                        matches = df_filtered[(df_filtered['label_1'].str.lower() == label) |
-                                                             (df_filtered['label_2'].str.lower() == label) |
-                                                             (df_filtered['label_3'].str.lower() == label)]
-                                        if not matches.empty:
-                                            last_time = matches.iloc[-1]['timestamp']
-                                            spoken_time = last_time.strftime("%I:%M %p on %B %d").lstrip("0")
-                                            message = f"The last time I saw {label} was at {spoken_time}."
-                                        else:
-                                            message = f"I never saw {label}{' ' + time_expr if time_expr else ''}."
-                                        break
-                print("Responding:", message)
-                # Send message to Home Assistant TTS
-                try:
+                                        message = f"No, the {m.group(1).strip()} does not come on {day}s."
+                                matched = True
+                                break
+                    if not matched:
+                        # If no object found but a time expression is present, prompt for object
+                        time_expr_regex = r"(today|yesterday|last week|this week|last month|this month|this weekend|last weekend|in (?:january|february|march|april|may|june|july|august|september|october|november|december))"
+                        time_expr_match = re.search(time_expr_regex, query)
+                        found_time = time_expr_match.group(0) if time_expr_match else None
+                        if found_time:
+                            pending_time_expr = found_time
+                            message = "What object are you asking about?"
+                        elif pending_time_expr:
+                            obj = self.normalize_object_label(query.strip())
+                            # Now combine with pending_time_expr and answer
+                            message = self.answer_object_time_query(obj, pending_time_expr)
+                            pending_time_expr = None
+                print(f"[USER QUERY] {query}")
+                print(f"[ASSISTANT RESPONSE] {message}")
+                # Send message to Home Assistant TTS (cloud_say)
+                def send_tts_to_ha(message):
+                    url = "http://localhost:8123/api/services/tts/cloud_say"
                     headers = {
                         "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
                         "Content-Type": "application/json",
                     }
-                    json_data = {
+                    payload = {
                         "entity_id": "media_player.den_speaker",
                         "message": message,
+                        "language": "en-US",
+                        "cache": False
                     }
-                    requests.post(
-                        "http://localhost:8123/api/services/tts/google_translate_say",
-                        headers=headers,
-                        json=json_data,
-                    )
-                except Exception as e:
-                    print(f"[DEBUG] Could not send message to Home Assistant: {e}")
-                tts = gTTS(message)
-                tts.save("assets/audio/response.mp3")
-                os.system("mpv assets/audio/response.mp3")
+                    print("[DEBUG] Posting to Home Assistant Cloud TTS:")
+                    print("[DEBUG] URL:", url)
+                    print("[DEBUG] Headers:", headers)
+                    print("[DEBUG] Payload:", json.dumps(payload, indent=2))
+                    try:
+                        response = requests.post(url, headers=headers, json=payload, timeout=10)
+                        print(f"[DEBUG] TTS Response Status: {response.status_code}")
+                        try:
+                            print("[DEBUG] TTS Response JSON:", response.json())
+                        except Exception:
+                            print("[DEBUG] TTS Response Text:", response.text)
+                    except Exception as e:
+                        print(f"[DEBUG] Could not send message to Home Assistant: {e}")
+                # Run TTS in a thread (non-blocking)
+                threading.Thread(target=send_tts_to_ha, args=(message,), daemon=True).start()
             except sr.WaitTimeoutError:
                 print("No speech detected. Try again...")
             except sr.UnknownValueError:
@@ -439,11 +702,34 @@ class DetectionAssistant:
         # Wait 3 seconds while detection buffer fills
         print("Warming up, please wait...")
         time.sleep(3)
-        # Generate and play intro
+        # Generate and play intro via Home Assistant
         intro_text = "Hello! I am your vision-aware assistant. I can see and detect objects in my view. Ask me what I see, or about past detections."
-        tts = gTTS(text=intro_text, lang='en')
-        tts.save("assets/audio/intro.mp3")
-        os.system("mpv assets/audio/intro.mp3")
+        def send_tts_to_ha(message):
+            url = "http://localhost:8123/api/services/tts/cloud_say"
+            headers = {
+                "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "entity_id": "media_player.den_speaker",
+                "message": message,
+                "language": "en-US",
+                "cache": False
+            }
+            print("[DEBUG] Posting to Home Assistant Cloud TTS (intro):")
+            print("[DEBUG] URL:", url)
+            print("[DEBUG] Headers:", headers)
+            print("[DEBUG] Payload:", json.dumps(payload, indent=2))
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=10)
+                print(f"[DEBUG] TTS Response Status: {response.status_code}")
+                try:
+                    print("[DEBUG] TTS Response JSON:", response.json())
+                except Exception:
+                    print("[DEBUG] TTS Response Text:", response.text)
+            except Exception as e:
+                print(f"[DEBUG] Could not send intro to Home Assistant: {e}")
+        threading.Thread(target=send_tts_to_ha, args=(intro_text,), daemon=True).start()
         self.voice_thread.start()
 
     def run(self):
@@ -479,9 +765,10 @@ class DetectionAssistant:
                 self.log_top_labels()
                 self.last_log_time = now
             # Show frame
-            cv2.imshow('Live Detection Assistant', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+            if not HEADLESS:
+                cv2.imshow('Live Detection Assistant', frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
         self.voice_active = False
         self.voice_thread.join()
         self.cleanup()
