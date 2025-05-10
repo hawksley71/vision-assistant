@@ -1,0 +1,4 @@
+trigger_vision_assistant:
+  url: "http://localhost:5000/trigger"
+  method: POST
+  content_type: "application/json" 

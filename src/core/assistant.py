@@ -25,11 +25,16 @@ from ..config.settings import PATHS, CAMERA_SETTINGS, LOGGING_SETTINGS, AUDIO_SE
 import json
 import random
 import difflib
+import spacy
+from spacy.matcher import PhraseMatcher
 
 load_dotenv()
 HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN")
 
 HEADLESS = os.environ.get("VISION_ASSISTANT_HEADLESS", "0") == "1"
+
+# Load spaCy model once at the top
+nlp = spacy.load("en_core_web_sm")
 
 class DetectionAssistant:
     def __init__(self):
@@ -70,6 +75,14 @@ class DetectionAssistant:
 
         self.last_reported_labels = []  # Track last reported labels for confidence queries
         self.last_reported_confidences = {}  # Track last reported confidences
+
+        self.nlp = nlp
+
+        self.pending_results = []
+        self.pending_index = 0
+        self.pending_query_type = None
+        self.pending_query_obj = None
+        self.pending_query_time = None
 
     def log_top_labels(self):
         if not self.detections_buffer:
@@ -251,7 +264,6 @@ class DetectionAssistant:
         df_all = load_all_logs()
         if df_all.empty:
             return "I haven't seen anything yet."
-        # Normalize object
         obj = self.normalize_object_label(obj)
         # Parse time expression
         start, end = self.parse_time_expression(time_expr)
@@ -259,21 +271,23 @@ class DetectionAssistant:
             df_filtered = df_all[(df_all['timestamp'] >= start) & (df_all['timestamp'] <= end)]
         else:
             df_filtered = df_all
-        # Search for object in filtered logs
         mask = (
-            df_filtered['label_1'].fillna('').str.lower() == obj or
-            df_filtered['label_2'].fillna('').str.lower() == obj or
-            df_filtered['label_3'].fillna('').str.lower() == obj
+            (df_filtered['label_1'].fillna('').str.lower() == obj) |
+            (df_filtered['label_2'].fillna('').str.lower() == obj) |
+            (df_filtered['label_3'].fillna('').str.lower() == obj)
         )
         matches = df_filtered.loc[mask]
-        if not matches.empty:
-            times = matches['timestamp'].dt.strftime("%I:%M %p on %A").str.lstrip("0").tolist()
-            if len(times) == 1:
-                return f"Yes, I saw {obj} at {times[0]} {('during ' + time_expr) if time_expr else ''}."
-            else:
-                return f"Yes, I saw {obj} {len(times)} times {('during ' + time_expr) if time_expr else ''}: {', '.join(times)}."
-        else:
+        times = matches['timestamp'].dt.strftime("%I:%M %p on %A").str.lstrip("0").tolist()
+        if not times:
             return f"No, I did not see {obj}{' ' + time_expr if time_expr else ''}."
+        # Limit to 5 results
+        limited = times[:5]
+        if len(times) == 1:
+            return f"Yes, I saw {obj} at {limited[0]} {('during ' + time_expr) if time_expr else ''}."
+        elif len(times) <= 5:
+            return f"Yes, I saw {obj} {len(times)} times {('during ' + time_expr) if time_expr else ''}: {', '.join(limited)}."
+        else:
+            return f"Yes, I saw {obj} {len(times)} times {('during ' + time_expr) if time_expr else ''}. Here are the first 5: {', '.join(limited)}."
 
     def voice_query_loop(self):
         print("Voice assistant is ready. Ask: 'What are you seeing right now?' or 'Did you see a [thing]?' or 'When did you last see [thing]?' or 'What was the first/last thing you saw?'. Say 'exit' to quit voice mode.")
@@ -649,18 +663,55 @@ class DetectionAssistant:
                                 matched = True
                                 break
                     if not matched:
-                        # If no object found but a time expression is present, prompt for object
-                        time_expr_regex = r"(today|yesterday|last week|this week|last month|this month|this weekend|last weekend|in (?:january|february|march|april|may|june|july|august|september|october|november|december))"
+                        # Expanded time expression regex to include days of the week
+                        time_expr_regex = r"(today|yesterday|last week|this week|last month|this month|this weekend|last weekend|on (monday|tuesday|wednesday|thursday|friday|saturday|sunday)|in (?:january|february|march|april|may|june|july|august|september|october|november|december))"
                         time_expr_match = re.search(time_expr_regex, query)
                         found_time = time_expr_match.group(0) if time_expr_match else None
-                        if found_time:
-                            pending_time_expr = found_time
-                            message = "What object are you asking about?"
-                        elif pending_time_expr:
-                            obj = self.normalize_object_label(query.strip())
-                            # Now combine with pending_time_expr and answer
+                        obj = self.extract_object_spacy(query)
+                        if found_time and not obj:
+                            # Load logs and filter by time
+                            def load_all_logs(log_dir="data/raw"):
+                                all_dfs = []
+                                log_files = sorted([f for f in os.listdir(log_dir) if f.endswith(".csv")])
+                                for f in log_files:
+                                    try:
+                                        df = pd.read_csv(os.path.join(log_dir, f))
+                                        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+                                        all_dfs.append(df)
+                                    except Exception as e:
+                                        print(f"Warning: Skipped {f} due to read error: {e}")
+                                if not all_dfs:
+                                    return pd.DataFrame(columns=["timestamp", "label_1", "count_1", "avg_conf_1", "label_2", "count_2", "avg_conf_2", "label_3", "count_3", "avg_conf_3"])
+                                return pd.concat(all_dfs, ignore_index=True).sort_values("timestamp")
+                            df_all = load_all_logs()
+                            start, end = self.parse_time_expression(found_time)
+                            if start is not None and end is not None:
+                                df_filtered = df_all[(df_all['timestamp'] >= start) & (df_all['timestamp'] <= end)]
+                            else:
+                                df_filtered = df_all
+                            # Count most frequent objects
+                            label_counts = {}
+                            for col in ["label_1", "label_2", "label_3"]:
+                                for label in df_filtered[col].dropna().str.lower():
+                                    label_counts[label] = label_counts.get(label, 0) + 1
+                            if label_counts:
+                                # Get top 5 most frequent objects
+                                top_labels = sorted(label_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+                                response = ", ".join([f"{label} ({count} times)" for label, count in top_labels])
+                                message = f"The most common objects I saw {found_time} were: {response}."
+                            else:
+                                message = f"I didn't see anything {found_time}."
+                        elif pending_time_expr and not obj:
+                            obj = self.extract_object_spacy(query)
                             message = self.answer_object_time_query(obj, pending_time_expr)
                             pending_time_expr = None
+                        elif obj and found_time:
+                            message = self.answer_object_time_query(obj, found_time)
+                            pending_time_expr = None
+                        elif obj:
+                            message = f"You asked about '{obj}', but I didn't catch a time expression."
+                        else:
+                            message = "Sorry, I didn't understand that."
                 print(f"[USER QUERY] {query}")
                 print(f"[ASSISTANT RESPONSE] {message}")
                 # Send message to Home Assistant TTS (cloud_say)

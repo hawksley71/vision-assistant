@@ -1,0 +1,16 @@
+[Unit]
+Description=Vision Assistant Webhook Server
+After=network.target
+
+[Service]
+Type=simple
+User=hawksley
+WorkingDirectory=/media/hawksley/E2B01BDEB01BB7CD/Users/hawks/Documents/Harvard/CSCI E-104 Advanced Deep Learning/Final Project
+Environment="PATH=/home/hawksley/mambaforge/envs/yolo8/bin"
+Environment="FLASK_APP=src.core.webhook"
+ExecStart=/home/hawksley/mambaforge/envs/yolo8/bin/flask run --host=0.0.0.0 --port=5000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

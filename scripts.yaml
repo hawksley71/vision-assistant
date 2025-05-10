@@ -1,0 +1,7 @@
+vision_assistant:
+  alias: "Start Vision Assistant"
+  description: "Starts the vision-aware assistant via webhook"
+  mode: single
+  sequence:
+    - service: rest_command.trigger_vision_assistant
+      data: {} 

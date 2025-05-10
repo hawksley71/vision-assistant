@@ -60,7 +60,7 @@ MODEL_SETTINGS = {
 CAMERA_SETTINGS = {
     'width': 640,     # Camera capture width in pixels
     'height': 480,    # Camera capture height in pixels
-    'fps': 30,        # Frames per second
+    'fps': 15,        # Frames per second (reduced from 30 to 15)
 }
 
 # Logging settings for detection and application logs

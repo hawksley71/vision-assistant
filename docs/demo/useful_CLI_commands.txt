@@ -1,0 +1,44 @@
+# Useful CLI Commands for Vision Assistant Project
+
+# 1. Activate the Conda Environment
+eval "$(conda shell.bash hook)"
+conda activate yolo8
+
+# 2. Start the Vision Assistant Service (background)
+sudo systemctl start vision-assistant
+
+# 3. Stop the Vision Assistant Service
+sudo systemctl stop vision-assistant
+
+# 4. Check Status of the Vision Assistant Service
+sudo systemctl status vision-assistant
+
+# 5. View Live Logs for the Vision Assistant Service
+sudo journalctl -u vision-assistant -f
+
+# 6. Start the Webhook Service (background)
+sudo systemctl start vision-assistant-webhook
+
+# 7. Stop the Webhook Service
+sudo systemctl stop vision-assistant-webhook
+
+# 8. Check Status of the Webhook Service
+sudo systemctl status vision-assistant-webhook
+
+# 9. View Live Logs for the Webhook Service
+sudo journalctl -u vision-assistant-webhook -f
+
+# 10. Run the Assistant Manually with Live Camera Feed (GUI, minimal nuisance messages)
+python -m src.core.assistant 2> >(grep -vE 'ALSA|pipewire|jack server|ffmpeg/demuxer|Cannot connect to server socket|JackShmReadWritePtr|Unknown PCM' >&2)
+
+# 11. Test the Webhook Endpoint Directly (from the assistant machine)
+curl -X POST http://localhost:5000/trigger
+
+# 12. Check What is Using Port 5000
+lsof -i :5000
+
+# 13. Kill a Process by PID (replace <PID> with the actual number)
+kill <PID>
+
+# 14. Reload systemd After Editing Service Files
+sudo systemctl daemon-reload 
