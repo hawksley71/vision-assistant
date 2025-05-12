@@ -28,6 +28,7 @@ import difflib
 from .openai_assistant import ask_openai, parse_query_with_openai
 import numpy as np
 from sklearn.cluster import KMeans
+from src.utils.audio import get_microphone
 
 load_dotenv()
 HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN")
@@ -82,13 +83,7 @@ class DetectionAssistant:
         self.voice_thread = threading.Thread(target=self.voice_query_loop, daemon=True)
         self.voice_active = True
         self.r = sr.Recognizer()
-        try:
-            self.mic = sr.Microphone(device_index=4)
-            print("Using CMTECK USB Microphone (device 4).")
-        except Exception as e:
-            print(f"Could not use CMTECK mic (device 4): {e}")
-            print("Falling back to default microphone.")
-            self.mic = sr.Microphone()  # Use default mic
+        mic = get_microphone()
 
         self.last_reported_labels = []  # Track last reported labels for confidence queries
         self.last_reported_confidences = {}  # Track last reported confidences
@@ -694,7 +689,7 @@ class DetectionAssistant:
         pending_time_expr = None
         while self.voice_active:
             try:
-                with self.mic as source:
+                with mic as source:
                     self.r.adjust_for_ambient_noise(source)
                     print("Listening...")
                     audio = self.r.listen(source, timeout=5)
@@ -1044,9 +1039,9 @@ class DetectionAssistant:
         """Listen for a voice query using Whisper."""
         try:
             print("Listening...")
-            with sr.Microphone() as source:
+            with mic as source:
                 # Adjust for ambient noise
-                self.r.adjust_for_ambient_noise(source, duration=0.5)
+                self.r.adjust_for_ambient_noise(source)
                 # Increase timeout and phrase time limit
                 audio = self.r.listen(source, timeout=10, phrase_time_limit=15)
                 print("Processing speech...")

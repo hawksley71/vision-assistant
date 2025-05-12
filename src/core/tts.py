@@ -1,12 +1,11 @@
 import requests
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from pathlib import Path
 import json
 
 # Load .env with token
-env_path = Path(__file__).parent / ".env"
-load_dotenv(dotenv_path=env_path)
+load_dotenv(find_dotenv())
 token = os.getenv("HOME_ASSISTANT_TOKEN")
 
 headers = {
