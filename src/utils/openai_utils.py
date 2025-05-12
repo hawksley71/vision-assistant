@@ -13,6 +13,9 @@ def get_openai_client():
 
 def create_log_assistant(client, file_ids, instructions=None, model="gpt-4o"):
     today = datetime.now().strftime("%Y-%m-%d")
+    concise_instruction = (
+        "Unless the user asks for step-by-step reasoning, always return only the final answer in one sentence."
+    )
     date_instruction = (
         f"Today's date is {today}. For any questions involving time, such as 'most recent', "
         "'last', 'yesterday', 'last week', 'last month', 'this winter', or any other relative "
@@ -22,8 +25,11 @@ def create_log_assistant(client, file_ids, instructions=None, model="gpt-4o"):
     if instructions is None:
         instructions = (
             "You are a detection log and date/time expert. Use Python and pandas to analyze the detection logs. "
-            "Only answer using your knowledge of the date and time and the detection logs."
+            "Only answer using your knowledge of the date and time and the detection logs. "
+            + concise_instruction
         )
+    else:
+        instructions = instructions.strip() + "\n" + concise_instruction
     instructions = instructions.strip() + "\n" + date_instruction
     assistant = client.beta.assistants.create(
         name="AI Report Assistant",
