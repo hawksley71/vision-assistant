@@ -57,6 +57,9 @@ yolov5/
 archive/
 deprecated/
 
+# Generated files
+assets/
+
 # OS specific
 .DS_Store
 Thumbs.db
