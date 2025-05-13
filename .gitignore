@@ -60,6 +60,11 @@ deprecated/
 # Generated files
 assets/
 
+# Jupyter Notebooks
+*.ipynb
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
 # OS specific
 .DS_Store
 Thumbs.db
