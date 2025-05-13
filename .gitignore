@@ -32,22 +32,30 @@ ENV/
 *.swo
 
 # Project specific
-outputs/
-downloads/
-models/weights/*.pt
-assets/audio/*.mp3
+*.log
+*.csv
+*.json
+*.pkl
+*.h5
+*.pt
+*.pth
+*.onnx
+*.engine
+*.trt
+*.wts
+*.weights
+*.cfg
+*.names
+*.txt
+!requirements.txt
+!docs/assistant_test_questions.txt
+
+# YOLOv5
 yolov5/
 
-# Data and logs
-data/raw/
-data/processed/
-data/logs/
-outputs/detections/
-outputs/logs/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-*/.ipynb_checkpoints/*
+# Archive and deprecated folders
+archive/
+deprecated/
 
 # OS specific
 .DS_Store
