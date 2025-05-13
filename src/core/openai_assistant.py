@@ -1,35 +1,95 @@
 import os
-from dotenv import load_dotenv
-import openai
-import json
+import time
 from datetime import datetime
+from openai import OpenAI
+from dotenv import load_dotenv, find_dotenv
+import json
 
-load_dotenv()
-OPENAI_TOKEN = os.getenv("OPENAI_TOKEN")
-client = openai.OpenAI(api_key=OPENAI_TOKEN)
+class OpenAIAssistantSession:
+    """
+    Manages an OpenAI assistant session for historical/pattern queries using the code interpreter tool.
+    Handles file upload, assistant and thread creation, and message exchange.
+    """
+    def __init__(self, csv_path):
+        """
+        Initialize the session: load API key, upload CSV, create assistant and thread, attach file to thread.
+        Args:
+            csv_path (str): Path to the combined detection logs CSV file.
+        """
+        _ = load_dotenv(find_dotenv())
+        self.client = OpenAI(
+            api_key=os.getenv("OPENAI_TOKEN"),
+            default_headers={"OpenAI-Beta": "assistants=v2"}
+        )
+        # Upload CSV file
+        with open(csv_path, "rb") as f:
+            file_obj = self.client.files.create(file=f, purpose="assistants")
+            self.file_id = file_obj.id
+        # Create assistant
+        today = datetime.now().strftime("%Y-%m-%d")
+        instructions = (
+            "You are a detection log and date/time expert. Use Python and pandas to analyze the detection logs. "
+            "Only answer using your knowledge of the date and time and the detection logs. "
+            "Unless the user asks for step-by-step reasoning, always return only the final answer in one sentence.\n"
+            f"Today's date is {today}. For any questions involving time, such as 'most recent', "
+            "'last', 'yesterday', 'last week', 'last month', 'this winter', or any other relative "
+            "date or time phrase, use this date as the reference for 'today'. "
+            "You have access to the detection logs as CSV files and can use Python and pandas to analyze them. "
+            "If a user asks about an object and you do not find an exact match for the object name in the logs, "
+            "search for partial string matches (case-insensitive) in the object labels. If you find up to three close matches, suggest them to the user as possible intended objects. "
+        )
+        self.assistant = self.client.beta.assistants.create(
+            name="AI Report Assistant",
+            instructions=instructions,
+            model="gpt-4o",
+            tools=[{"type": "code_interpreter"}]
+        )
+        # Create thread
+        self.thread = self.client.beta.threads.create()
+        # Attach the file to the thread with an initial message
+        self.client.beta.threads.messages.create(
+            thread_id=self.thread.id,
+            role="user",
+            content="Please load the attached detection log for future questions.",
+            attachments=[{"file_id": self.file_id, "tools": [{"type": "code_interpreter"}]}]
+        )
 
-# Get the current date
-current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-# Create the system message with the f-string evaluated
-system_message = f"""You are a vision-aware assistant that can see and detect objects. 
-You can answer questions about what you see in real-time and what you've seen in the past. 
-If you don't know something or can't see it, say so.
-Today's date is {current_date}. Answer time-sensitive queries relative to this date.
-
-Example queries and responses:
-- "What do you see?" -> "Right now, I am seeing a person and a chair."
-- "Have you seen a cat?" -> "Yes, I saw a cat at 2:30 PM on Monday."
-- "How confident are you?" -> "I am 85% confident about the person and 60% confident about the chair."
-- "When does the bus usually come?" -> "The bus is usually detected around 8:30 AM and 5:15 PM on weekdays."
-- "What was the last thing you saw?" -> "The last thing I saw was a dog at 3:45 PM today."
-
-If you don't know something or can't see it, respond with phrases like:
-- "I'm not seeing anything right now."
-- "I haven't seen that before."
-- "I'm not sure what you're asking about."
-- "Could you please specify what object you're asking about?"
-"""
+    def ask_historical_question(self, user_input, last_object=None):
+        """
+        Send a question to the assistant and return the latest response.
+        Args:
+            user_input (str): The user's question.
+            last_object (str, optional): If provided and 'this' is in the question, replace 'this' with last_object.
+        Returns:
+            str: The assistant's response.
+        """
+        if last_object and "this" in user_input.lower():
+            user_input = user_input.lower().replace("this", last_object)
+        # Send message
+        self.client.beta.threads.messages.create(
+            thread_id=self.thread.id,
+            role="user",
+            content=user_input
+        )
+        run = self.client.beta.threads.runs.create(
+            thread_id=self.thread.id,
+            assistant_id=self.assistant.id
+        )
+        # Wait for completion
+        while True:
+            run_status = self.client.beta.threads.runs.retrieve(thread_id=self.thread.id, run_id=run.id)
+            if run_status.status == "completed":
+                break
+            elif run_status.status in {"failed", "cancelled", "expired"}:
+                raise RuntimeError(f"Run failed: {run_status.status}")
+            time.sleep(1)
+        # Get latest assistant response
+        messages = self.client.beta.threads.messages.list(thread_id=self.thread.id)
+        latest_msg = messages.data[0]
+        for content in latest_msg.content:
+            if hasattr(content, "text"):
+                return content.text.value
+        return "No response from assistant."
 
 def ask_openai(prompt, model="gpt-3.5-turbo", max_tokens=300, temperature=0.2):
     response = client.chat.completions.create(

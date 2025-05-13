@@ -9,7 +9,7 @@ except Exception:
     pass
 import cv2
 import time
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 import csv
 from datetime import datetime, timedelta
 from src.models.yolov8_model import YOLOv8Model
@@ -36,7 +36,7 @@ HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN")
 HEADLESS = os.environ.get("VISION_ASSISTANT_HEADLESS", "0") == "1"
 
 class DetectionAssistant:
-    def __init__(self):
+    def __init__(self, mic):
         # Initialize camera
         self.cap = cv2.VideoCapture(0)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_SETTINGS['width'])
@@ -66,7 +66,8 @@ class DetectionAssistant:
         sanitized_date = self.sanitize_filename(today_str)
         self.log_path = os.path.join(PATHS['data']['raw'], f"detections_{sanitized_date}.csv")
         self.last_log_time = time.time()
-        self.detections_buffer = []  # Store detections for the current 1s interval
+        # Use deque with maxlen to keep last 30 detections (about 1 second at 30fps)
+        self.detections_buffer = deque(maxlen=30)
         # Write header if file does not exist
         if not os.path.exists(self.log_path):
             os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
@@ -83,7 +84,7 @@ class DetectionAssistant:
         self.voice_thread = threading.Thread(target=self.voice_query_loop, daemon=True)
         self.voice_active = True
         self.r = sr.Recognizer()
-        mic = get_microphone()
+        self.mic = mic
 
         self.last_reported_labels = []  # Track last reported labels for confidence queries
         self.last_reported_confidences = {}  # Track last reported confidences
@@ -92,6 +93,8 @@ class DetectionAssistant:
         self.combined_df = None
         self.last_combined_log_date = None
         self.write_combined_logs_once_per_day(force=True)
+
+        self.show_feed = False  # New flag to control when to show the camera feed
 
     def sanitize_filename(self, name):
         return re.sub(r'[^A-Za-z0-9]+', '_', name)
@@ -138,9 +141,6 @@ class DetectionAssistant:
             writer = csv.writer(f)
             writer.writerow(row)
             
-        # Clear buffer
-        self.detections_buffer = []
-
         # Write combined logs if the day has changed
         self.write_combined_logs_once_per_day()
 
@@ -155,10 +155,11 @@ class DetectionAssistant:
 
     def summarize_buffer_labels(self):
         # Only return the top 1-3 labels (no confidence or count)
+        print(f"[DEBUG] Current buffer size: {len(self.detections_buffer)}")
         if not self.detections_buffer:
             self.last_reported_labels = []
             self.last_reported_confidences = {}
-            return "I'm not seeing anything right now."
+            return "Warming up, please wait..."
         label_counts = Counter()
         label_confidences = defaultdict(list)
         for det in self.detections_buffer:
@@ -199,9 +200,31 @@ class DetectionAssistant:
         # Report the average confidence for the last reported label(s)
         print(f"[DEBUG] last_reported_labels: {self.last_reported_labels}")
         print(f"[DEBUG] last_reported_confidences: {self.last_reported_confidences}")
+        # If no last reported, try to summarize current buffer
+        if (not self.last_reported_labels or not self.last_reported_confidences) and self.detections_buffer:
+            print("[DEBUG] No last reported labels/confidences, summarizing current buffer instead.")
+            label_counts = Counter()
+            label_confidences = defaultdict(list)
+            for det in self.detections_buffer:
+                label = det['class_name']
+                conf = det['confidence']
+                label_counts[label] += 1
+                label_confidences[label].append(conf)
+            avg_confidences = {label: sum(confs)/len(confs) for label, confs in label_confidences.items()}
+            sorted_labels = sorted(avg_confidences.items(), key=lambda x: x[1], reverse=True)[:3]
+            if not sorted_labels:
+                print("[DEBUG] No detections in buffer for confidence summary.")
+                return "I don't have confidence information for the current detection."
+            parts = []
+            for label, conf in sorted_labels:
+                percent_conf = int(round(conf * 100))
+                parts.append(f"{label}: {percent_conf}%")
+            if len(parts) == 1:
+                return f"My average confidence for {parts[0].split(':')[0]} is {parts[0].split(':')[1].strip()}."
+            return "My average confidences are: " + ", ".join(parts) + "."
         if not self.last_reported_labels or not self.last_reported_confidences:
-            print("[DEBUG] No last reported labels/confidences available.")
-            return "I haven't reported any detections yet."
+            print("[DEBUG] No last reported labels/confidences available and buffer is empty.")
+            return "I don't have confidence information for the current detection."
         parts = []
         for label in self.last_reported_labels:
             confs = self.last_reported_confidences.get(label, [])
@@ -473,7 +496,33 @@ class DetectionAssistant:
                         return f"Yes, I saw {closest_match} at {times[0]} {('during ' + time_expr) if time_expr else ''}."
                     else:
                         return f"Yes, I saw {closest_match} {len(times)} times {('during ' + time_expr) if time_expr else ''}: {', '.join(times)}."
-            return f"No, I did not see {obj}{' ' + time_expr if time_expr else ''}."
+            print(f"[DEBUG] No match found for '{obj}' in available labels: {sorted(all_labels)}")
+            # Partial substring match: greedy, up to 3 most recent unique matches
+            partial_matches = []
+            partial_match_counts = {}
+            found_labels = set()
+            for idx, row in df_filtered.sort_values('timestamp', ascending=False).iterrows():
+                for col in ['label_1', 'label_2', 'label_3']:
+                    label = str(row.get(col, '')).lower().strip()
+                    norm_label = self.normalize_object_label(label)
+                    if norm_label and obj in norm_label and norm_label != obj and norm_label not in found_labels:
+                        found_labels.add(norm_label)
+                        partial_matches.append(norm_label)
+                        partial_match_counts[norm_label] = 1
+                        if len(partial_matches) == 3:
+                            break
+                if len(partial_matches) == 3:
+                    break
+            if partial_matches:
+                for norm_label in partial_matches:
+                    count = 0
+                    for col in ['label_1', 'label_2', 'label_3']:
+                        count += (df_filtered[col].fillna('').astype(str).str.lower().apply(self.normalize_object_label) == norm_label).sum()
+                    partial_match_counts[norm_label] = count
+                partial_matches_sorted = sorted(partial_matches, key=lambda l: -partial_match_counts[l])
+                return (f"No, I have not seen {obj}{' ' + time_expr if time_expr else ''}, "
+                        f"but I have seen: {', '.join(partial_matches_sorted)}. Did you mean one of these?")
+            return f"No, I have not seen {obj}{' ' + time_expr if time_expr else ''}."
 
     def analyze_object_pattern(self, df, object_label):
         mask = (
@@ -689,7 +738,7 @@ class DetectionAssistant:
         pending_time_expr = None
         while self.voice_active:
             try:
-                with mic as source:
+                with self.mic as source:
                     self.r.adjust_for_ambient_noise(source)
                     print("Listening...")
                     audio = self.r.listen(source, timeout=5)
@@ -969,6 +1018,8 @@ class DetectionAssistant:
         send_tts_to_ha(intro_text)
         # Wait for intro to finish playing
         self.wait_for_intro_to_finish()
+        # Now allow the camera feed to be shown
+        self.show_feed = True
         # Now start the voice thread
         self.voice_thread.start()
 
@@ -1021,12 +1072,16 @@ class DetectionAssistant:
                 self.log_top_labels()
                 self.last_log_time = now
                 
-            # Show frame
-            if not HEADLESS:
+            # Show frame only if show_feed is True and not HEADLESS
+            if self.show_feed and not HEADLESS:
                 cv2.imshow('Live Detection Assistant', frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
-                    
+            # If not showing feed, still allow quit with 'q' if window is open
+            elif not self.show_feed and not HEADLESS:
+                if cv2.getWindowProperty('Live Detection Assistant', cv2.WND_PROP_VISIBLE) >= 1:
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
         self.voice_active = False
         self.voice_thread.join()
         self.cleanup()
@@ -1039,7 +1094,7 @@ class DetectionAssistant:
         """Listen for a voice query using Whisper."""
         try:
             print("Listening...")
-            with mic as source:
+            with self.mic as source:
                 # Adjust for ambient noise
                 self.r.adjust_for_ambient_noise(source)
                 # Increase timeout and phrase time limit
@@ -1058,6 +1113,19 @@ class DetectionAssistant:
         except Exception as e:
             print(f"Error in speech recognition: {str(e)}")
             return None
+
+    def answer_live_query(self, user_input):
+        """
+        Given a user query about the live camera feed, return a response string.
+        """
+        query = user_input.lower()
+        if "what do you see" in query or "what are you seeing" in query:
+            return self.summarize_buffer_labels()
+        confidence_keywords = ["confident", "confidence", "sure", "certain", "accurate", "reliable"]
+        if any(word in query for word in confidence_keywords):
+            return self.summarize_buffer_confidence()
+        # Add more patterns/intents as needed
+        return "I'm not sure how to answer that about the live feed."
 
 if __name__ == "__main__":
     assistant = DetectionAssistant()
