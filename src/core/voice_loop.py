@@ -10,6 +10,7 @@ from src.utils.audio import get_microphone
 import speech_recognition as sr
 from src.core.assistant import DetectionAssistant
 import re
+from src.config.settings import PATHS, CAMERA_SETTINGS, LOGGING_SETTINGS, AUDIO_SETTINGS, HOME_ASSISTANT
 
 # Load environment variables
 load_dotenv()
@@ -394,8 +395,11 @@ class VoiceLoop:
         self.live_assistant.cap.release()
         cv2.destroyAllWindows()
 
-if __name__ == "__main__":
+def main():
     # Example usage
-    csv_path = "outputs/combined_logs.csv"
+    csv_path = PATHS['data']['combined_logs']
     voice_loop = VoiceLoop(csv_path)
-    voice_loop.run() 
+    voice_loop.run()
+
+if __name__ == "__main__":
+    main() 

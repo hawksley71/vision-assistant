@@ -24,6 +24,7 @@ PATHS = {
         'raw': os.path.join(PROJECT_ROOT, 'data', 'raw'),        # Raw detection logs
         'processed': os.path.join(PROJECT_ROOT, 'data', 'processed'),  # Processed data files
         'logs': os.path.join(PROJECT_ROOT, 'data', 'logs'),      # Application logs
+        'combined_logs': os.path.join(PROJECT_ROOT, 'data', 'processed', 'combined_logs.csv'),  # Combined detection logs
     },
     'models': {
         'weights': os.path.join(PROJECT_ROOT, 'models', 'weights'),  # Model weights directory

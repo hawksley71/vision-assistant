@@ -21,7 +21,7 @@ import re
 import pandas as pd
 import requests
 from dotenv import load_dotenv
-from ..config.settings import PATHS, CAMERA_SETTINGS, LOGGING_SETTINGS, AUDIO_SETTINGS, HOME_ASSISTANT
+from src.config.settings import PATHS, CAMERA_SETTINGS, LOGGING_SETTINGS, AUDIO_SETTINGS, HOME_ASSISTANT
 import json
 import random
 import difflib
@@ -89,7 +89,7 @@ class DetectionAssistant:
         self.last_reported_labels = []  # Track last reported labels for confidence queries
         self.last_reported_confidences = {}  # Track last reported confidences
 
-        self.combined_logs_path = "outputs/combined_logs.csv"
+        self.combined_logs_path = PATHS['data']['combined_logs']
         self.combined_df = None
         self.last_combined_log_date = None
         self.write_combined_logs_once_per_day(force=True)
@@ -378,11 +378,9 @@ class DetectionAssistant:
         return combined_df
 
     def write_combined_logs_for_debug(self, df):
-        output_path = "outputs/combined_logs.csv"
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        print(f"[DEBUG] About to write DataFrame of shape {df.shape} to {output_path}")
+        output_path = PATHS['data']['combined_logs']
         df.to_csv(output_path, index=False)
-        print(f"[DEBUG] Wrote combined logs to {output_path}")
+        print(f"Debug: Combined logs written to {output_path}")
 
     def write_combined_logs_once_per_day(self, force=False):
         # Write combined logs only if the day has changed or force is True

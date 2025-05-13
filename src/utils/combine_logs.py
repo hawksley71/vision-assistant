@@ -1,6 +1,7 @@
 import os
 import sys
 import pandas as pd
+from src.config.settings import PATHS
 
 # Get the project root directory (parent of src)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -42,6 +43,18 @@ def combine_and_clean_logs(log_dir=None, output_file=None):
     combined_df.to_csv(output_file, index=False)
     print(f"Combined logs saved to {output_file} (shape: {combined_df.shape})")
     return combined_df
+
+def combine_logs(output_file=None):
+    """
+    Combine all daily log files into a single CSV file.
+    
+    Args:
+        output_file (str): Output CSV file path. If None, uses default path from settings.
+    """
+    if output_file is None:
+        output_file = PATHS['data']['combined_logs']
+    
+    # ... rest of the function ...
 
 if __name__ == "__main__":
     # Usage: python combine_logs.py [log_dir] [output_csv]
