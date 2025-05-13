@@ -17,6 +17,8 @@ This project is a modular, voice-driven, vision-aware assistant that integrates 
 Home Assistant is an open-source home automation platform. In this project, it is used to play TTS responses on a smart speaker. The assistant sends HTTP requests to Home Assistant's TTS service, which then vocalizes responses to the user.
 
 ## Setup Instructions
+
+### Linux Setup
 1. Install [Mamba](https://mamba.readthedocs.io/en/latest/installation.html) or [Conda](https://docs.conda.io/en/latest/miniconda.html).
 2. Create the environment:
    ```
@@ -33,6 +35,14 @@ Home Assistant is an open-source home automation platform. In this project, it i
 4. Set up your `.env` file with OpenAI and Home Assistant tokens.
 5. Run the main assistant script as described below.
 
+### Windows Setup
+For Windows users, please refer to the detailed setup guide in `docs/windows_setup.md`. The guide covers:
+- Prerequisites installation
+- Project setup
+- Audio configuration
+- Home Assistant setup
+- Common troubleshooting
+
 ## Codebase Structure and File Descriptions
 
 ### src/core/
@@ -43,7 +53,7 @@ Home Assistant is an open-source home automation platform. In this project, it i
 - **webhook.py**: (If used) Handles webhook integration for external triggers.
 
 ### src/utils/
-- **audio.py**: Microphone selection and audio device utilities.
+- **audio.py**: Cross-platform microphone selection and audio device utilities. Supports both Linux and Windows systems.
 - **mic_test.py**: Script to test and debug microphone input.
 - **openai_utils.py**: Helper functions for OpenAI API usage.
 - **combine_logs.py**: Combines daily detection logs into a single CSV for historical analysis.
@@ -60,9 +70,15 @@ Home Assistant is an open-source home automation platform. In this project, it i
 - **generate_fake_logs.py**: Generates synthetic detection logs for testing.
 - **estimate_token_usage.py**: Estimates OpenAI API token usage for logs.
 
+### Data Organization
+- **data/raw/**: Original detection logs
+- **data/processed/**: Combined and processed detection logs
+- **data/logs/**: Application logs
+
 ### Other
 - **docs/assistant_test_questions.txt**: List of test questions for all objects.
 - **docs/environment.yml**: Environment specification for reproducibility.
+- **docs/windows_setup.md**: Detailed Windows setup guide.
 
 ## What Has Been Accomplished
 - Live object detection with YOLOv8 and robust detection buffer.
@@ -71,6 +87,8 @@ Home Assistant is an open-source home automation platform. In this project, it i
 - Seamless TTS output via Home Assistant.
 - Modular, extensible codebase with clear separation of concerns.
 - Comprehensive test question set for all objects.
+- Cross-platform support (Linux and Windows).
+- Standardized data organization structure.
 
 (See `docs/reports/` for project plans, requirements, and summaries.)
 
@@ -82,12 +100,16 @@ Home Assistant is an open-source home automation platform. In this project, it i
 - Add user authentication and personalized responses.
 - Optimize for edge devices (e.g., Raspberry Pi with Coral/Jetson).
 - Expand dataset and detection classes for broader use cases.
+- Add macOS support and documentation.
 
 ---
 
 ## How to Run
 1. Start Home Assistant and ensure the TTS service is available.
-2. Run the main assistant script (see `src/core/assistant.py` or `src/core/voice_loop.py`).
+2. Run the main assistant script:
+   ```bash
+   python -m src.core.voice_loop
+   ```
 3. Interact via microphone and listen for responses on your Home Assistant speaker.
 
 ---
