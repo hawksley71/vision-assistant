@@ -1,0 +1,21 @@
+name: vision-assistant
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - opencv
+  - scikit-learn
+  - requests
+  - python-dotenv
+  - gtts
+  - pip
+  - pip:
+      - speechrecognition
+      - openai
+      - pyaudio
+      - mamba
+      - yolov8
+      - python-dateutil 

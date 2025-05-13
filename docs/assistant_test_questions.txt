@@ -1,0 +1,134 @@
+# Assistant Test Questions for All Objects
+
+# DAYTIME_OBJECTS
+cat:
+- Have you seen a cat before?
+- Did you ever detect a cat?
+- When did you last see a cat?
+- Is there a pattern for the cat?
+- When do you expect a cat to appear?
+- On which days do cats usually come?
+- What time do you usually see cats?
+
+dog:
+- Have you seen a dog before?
+- Did you ever detect a dog?
+- When did you last see a dog?
+- Is there a pattern for the dog?
+- When do you expect a dog to appear?
+- On which days do dogs usually come?
+- What time do you usually see dogs?
+
+bird:
+- Have you seen a bird before?
+- Did you ever detect a bird?
+- When did you last see a bird?
+- Is there a pattern for the bird?
+- When do you expect a bird to appear?
+- On which days do birds usually come?
+- What time do you usually see birds?
+
+chipmunk:
+- Have you seen a chipmunk before?
+- Did you ever detect a chipmunk?
+- When did you last see a chipmunk?
+- Is there a pattern for the chipmunk?
+- When do you expect a chipmunk to appear?
+- On which days do chipmunks usually come?
+- What time do you usually see chipmunks?
+
+bicycle:
+- Have you seen a bicycle before?
+- Did you ever detect a bicycle?
+- When did you last see a bicycle?
+- Is there a pattern for the bicycle?
+- When do you expect a bicycle to appear?
+- On which days do bicycles usually come?
+- What time do you usually see bicycles?
+
+car:
+- Have you seen a car before?
+- Did you ever detect a car?
+- When did you last see a car?
+- Is there a pattern for the car?
+- When do you expect a car to appear?
+- On which days do cars usually come?
+- What time do you usually see cars?
+
+truck:
+- Have you seen a truck before?
+- Did you ever detect a truck?
+- When did you last see a truck?
+- Is there a pattern for the truck?
+- When do you expect a truck to appear?
+- On which days do trucks usually come?
+- What time do you usually see trucks?
+
+stroller:
+- Have you seen a stroller before?
+- Did you ever detect a stroller?
+- When did you last see a stroller?
+- Is there a pattern for the stroller?
+- When do you expect a stroller to appear?
+- On which days do strollers usually come?
+- What time do you usually see strollers?
+
+prime van:
+- Have you seen a prime van before?
+- Did you ever detect a prime van?
+- When did you last see a prime van?
+- Is there a pattern for the prime van?
+- When do you expect a prime van to appear?
+- On which days do prime vans usually come?
+- What time do you usually see prime vans?
+
+ups truck:
+- Have you seen a ups truck before?
+- Did you ever detect a ups truck?
+- When did you last see a ups truck?
+- Is there a pattern for the ups truck?
+- When do you expect a ups truck to appear?
+- On which days do ups trucks usually come?
+- What time do you usually see ups trucks?
+
+fedex truck:
+- Have you seen a fedex truck before?
+- Did you ever detect a fedex truck?
+- When did you last see a fedex truck?
+- Is there a pattern for the fedex truck?
+- When do you expect a fedex truck to appear?
+- On which days do fedex trucks usually come?
+- What time do you usually see fedex trucks?
+
+person:
+- Have you seen a person before?
+- Did you ever detect a person?
+- When did you last see a person?
+- Is there a pattern for the person?
+- When do you expect a person to appear?
+- On which days do people usually come?
+- What time do you usually see people?
+
+# SPECIAL_OBJECTS
+school bus:
+- Have you seen a school bus before?
+- Did you ever detect a school bus?
+- When did you last see a school bus?
+- Is there a pattern for the school bus?
+- When do you expect a school bus to appear?
+- On which days do school buses usually come?
+- What time do you usually see school buses?
+- Does the school bus come on weekdays?
+- Does the school bus come in the summer?
+
+mail truck:
+- Have you seen a mail truck before?
+- Did you ever detect a mail truck?
+- When did you last see a mail truck?
+- Is there a pattern for the mail truck?
+- When do you expect a mail truck to appear?
+- On which days do mail trucks usually come?
+- What time do you usually see mail trucks?
+- Does the mail truck come on weekends?
+
+... (repeat for each SPECIAL_OBJECTS entry, using similar question templates and adjusting for unique rules, e.g., "Does the snow plow come in winter?", "How often does the recycling truck come?", "Does the ice cream truck come in July?", etc.) 
