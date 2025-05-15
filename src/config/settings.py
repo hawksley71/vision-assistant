@@ -22,7 +22,7 @@ PATHS = {
     'data': {
         'raw': os.path.join(PROJECT_ROOT, 'data', 'raw'),
         'processed': os.path.join(PROJECT_ROOT, 'data', 'processed'),
-        'audio': os.path.join(PROJECT_ROOT, 'data', 'audio'),
+        'combined_logs': os.path.join(PROJECT_ROOT, 'data', 'processed', 'combined_logs.csv'),
     },
     'models': {
         'yolov8': os.path.join(PROJECT_ROOT, 'models', 'yolov8', 'yolov8n.pt'),  # YOLOv8 model path
@@ -32,7 +32,8 @@ PATHS = {
 
 # Create directories if they don't exist
 for path in PATHS['data'].values():
-    os.makedirs(path, exist_ok=True)
+    if not os.path.splitext(path)[1]:  # Only create if no file extension
+        os.makedirs(path, exist_ok=True)
 os.makedirs(PATHS['logs'], exist_ok=True)
 
 # Model settings
@@ -71,7 +72,7 @@ HOME_ASSISTANT = {
 
 # OpenAI settings
 OPENAI = {
-    'api_key': os.getenv('OPENAI_API_KEY', ''),
+    'api_key': os.getenv('OPENAI_TOKEN', ''),
     'model': 'gpt-4-turbo-preview',
     'temperature': 0.7,
     'max_tokens': 1000,
@@ -88,13 +89,18 @@ def create_directories():
     """
     Create all required directories if they don't exist.
     This function is called automatically when the module is imported.
-    It ensures all necessary directories for data, models, outputs, and assets exist.
+    It ensures all necessary directories for data, models, and logs exist.
     """
     for category in PATHS.values():
-        for path in category.values():
+        if isinstance(category, dict):
+            for path in category.values():
+                # Only create if path does not look like a file (no extension)
+                if not os.path.splitext(path)[1]:
+                    os.makedirs(path, exist_ok=True)
+        elif isinstance(category, str):
             # Only create if path does not look like a file (no extension)
-            if not os.path.splitext(path)[1]:
-                os.makedirs(path, exist_ok=True)
+            if not os.path.splitext(category)[1]:
+                os.makedirs(category, exist_ok=True)
 
 # Initialize directories when module is imported
 create_directories()

@@ -21,7 +21,7 @@ import re
 import pandas as pd
 import requests
 from dotenv import load_dotenv
-from src.config.settings import PATHS, CAMERA_SETTINGS, LOGGING_SETTINGS, AUDIO_SETTINGS, HOME_ASSISTANT
+from src.config.settings import PATHS, CAMERA_SETTINGS, LOGGING, AUDIO_SETTINGS, HOME_ASSISTANT
 import json
 import random
 import difflib

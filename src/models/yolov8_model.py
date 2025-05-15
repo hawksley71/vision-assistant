@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from ultralytics import YOLO
 from .base_model import BaseModel
-from ..config.settings import MODEL_CONFIG
+from ..config.settings import MODEL_SETTINGS
 
 class YOLOv8Model(BaseModel):
     """YOLOv8 model implementation."""

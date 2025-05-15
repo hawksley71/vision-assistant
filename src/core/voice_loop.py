@@ -10,7 +10,7 @@ from src.utils.audio import get_microphone
 import speech_recognition as sr
 from src.core.assistant import DetectionAssistant
 import re
-from src.config.settings import PATHS, CAMERA_SETTINGS, LOGGING_SETTINGS, AUDIO_SETTINGS, HOME_ASSISTANT
+from src.config.settings import PATHS, CAMERA_SETTINGS, LOGGING, AUDIO_SETTINGS, HOME_ASSISTANT
 
 # Load environment variables
 load_dotenv()

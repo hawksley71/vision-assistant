@@ -10,6 +10,10 @@ class OpenAIAssistantSession:
     Manages an OpenAI assistant session for historical/pattern queries using the code interpreter tool.
     Handles file upload, assistant and thread creation, and message exchange.
     """
+    # Class-level cache for file IDs and assistant ID
+    _file_cache = {}
+    _assistant_id = None
+    
     def __init__(self, csv_path):
         """
         Initialize the session: load API key, upload CSV, create assistant and thread, attach file to thread.
@@ -17,33 +21,76 @@ class OpenAIAssistantSession:
             csv_path (str): Path to the combined detection logs CSV file.
         """
         _ = load_dotenv(find_dotenv())
-        self.client = OpenAI(
-            api_key=os.getenv("OPENAI_TOKEN"),
-            default_headers={"OpenAI-Beta": "assistants=v2"}
-        )
-        # Upload CSV file
-        with open(csv_path, "rb") as f:
-            file_obj = self.client.files.create(file=f, purpose="assistants")
-            self.file_id = file_obj.id
-        # Create assistant
-        today = datetime.now().strftime("%Y-%m-%d")
-        instructions = (
-            "You are a detection log and date/time expert. Use Python and pandas to analyze the detection logs. "
-            "Only answer using your knowledge of the date and time and the detection logs. "
-            "Unless the user asks for step-by-step reasoning, always return only the final answer in one sentence.\n"
-            f"Today's date is {today}. For any questions involving time, such as 'most recent', "
-            "'last', 'yesterday', 'last week', 'last month', 'this winter', or any other relative "
-            "date or time phrase, use this date as the reference for 'today'. "
-            "You have access to the detection logs as CSV files and can use Python and pandas to analyze them. "
-            "If a user asks about an object and you do not find an exact match for the object name in the logs, "
-            "search for partial string matches (case-insensitive) in the object labels. If you find up to three close matches, suggest them to the user as possible intended objects. "
-        )
-        self.assistant = self.client.beta.assistants.create(
-            name="AI Report Assistant",
-            instructions=instructions,
-            model="gpt-4o",
-            tools=[{"type": "code_interpreter"}]
-        )
+        api_key = os.getenv("OPENAI_TOKEN")
+        print(f"[DEBUG] OpenAI API Key loaded: {api_key[:8]}...{api_key[-4:] if api_key else 'None'}")
+        print(f"[DEBUG] API Key length: {len(api_key) if api_key else 0}")
+        print(f"[DEBUG] API Key contains whitespace: {bool(api_key and any(c.isspace() for c in api_key))}")
+        
+        try:
+            self.client = OpenAI(
+                api_key=api_key,
+                default_headers={"OpenAI-Beta": "assistants=v2"}
+            )
+            print("[DEBUG] OpenAI client initialized successfully")
+            
+            # Test basic API functionality
+            print("[DEBUG] Testing API key with basic API call...")
+            test_response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": "Say hello"}],
+                max_tokens=5
+            )
+            print("[DEBUG] Basic API test successful")
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize OpenAI client: {str(e)}")
+            raise
+        
+        # Check if file is already uploaded
+        if csv_path in self._file_cache:
+            print("[DEBUG] Reusing existing file ID from cache")
+            self.file_id = self._file_cache[csv_path]
+        else:
+            print("[DEBUG] Uploading new file")
+            try:
+                # Upload CSV file
+                with open(csv_path, "rb") as f:
+                    file_obj = self.client.files.create(file=f, purpose="assistants")
+                    self.file_id = file_obj.id
+                    # Cache the file ID
+                    self._file_cache[csv_path] = self.file_id
+                print("[DEBUG] File uploaded successfully")
+            except Exception as e:
+                print(f"[ERROR] Failed to upload file: {str(e)}")
+                raise
+        
+        # Create or reuse assistant
+        if self._assistant_id is None:
+            print("[DEBUG] Creating new assistant")
+            today = datetime.now().strftime("%Y-%m-%d")
+            instructions = (
+                "You are a detection log and date/time expert. Use Python and pandas to analyze the detection logs. "
+                "Only answer using your knowledge of the date and time and the detection logs. "
+                "Unless the user asks for step-by-step reasoning, always return only the final answer in one sentence.\n"
+                f"Today's date is {today}. For any questions involving time, such as 'most recent', "
+                "'last', 'yesterday', 'last week', 'last month', 'this winter', or any other relative "
+                "date or time phrase, use this date as the reference for 'today'. "
+                "You have access to the detection logs as CSV files and can use Python and pandas to analyze them. "
+                "If a user asks about an object and you do not find an exact match for the object name in the logs, "
+                "search for partial string matches (case-insensitive) in the object labels. If you find up to three close matches, suggest them to the user as possible intended objects. "
+            )
+            self.assistant = self.client.beta.assistants.create(
+                name="AI Report Assistant",
+                instructions=instructions,
+                model="gpt-4o",
+                tools=[{"type": "code_interpreter"}]
+            )
+            self._assistant_id = self.assistant.id
+            print(f"[DEBUG] Created new assistant with ID: {self._assistant_id}")
+        else:
+            print(f"[DEBUG] Reusing existing assistant with ID: {self._assistant_id}")
+            self.assistant = self.client.beta.assistants.retrieve(self._assistant_id)
+        
         # Create thread
         self.thread = self.client.beta.threads.create()
         # Attach the file to the thread with an initial message

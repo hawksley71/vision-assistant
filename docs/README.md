@@ -23,12 +23,12 @@ vision-assistant/
 │       └── settings.py
 ├── data/                  # Data directory (not in git)
 │   ├── raw/              # Raw detection logs
-│   ├── processed/        # Processed logs
-│   └── audio/            # Audio recordings
+│   └── processed/        # Processed logs
 ├── docs/                  # Documentation
 │   ├── reports/          # Project reports (not in git)
 │   ├── data_setup.md     # Data setup guide
-│   └── windows_setup.md  # Windows setup guide
+│   ├── windows_setup.md  # Windows setup guide
+│   └── home_assistant_setup.md  # Home Assistant setup guide
 ├── models/               # Model weights (not in git)
 │   └── yolov8/          # YOLOv8 weights
 ├── tools/               # Utility scripts
@@ -44,6 +44,8 @@ vision-assistant/
 - Git
 - Webcam
 - Microphone
+- Docker (for Home Assistant)
+- Internet connection (required for TTS and model downloads)
 
 ### Installation
 
@@ -70,11 +72,18 @@ vision-assistant/
    - See [Data Setup Guide](docs/data_setup.md) for instructions
    - Generate test data using the provided scripts
 
-5. Set up environment variables:
+5. Set up Home Assistant:
+   - See [Home Assistant Setup Guide](docs/home_assistant_setup.md) for Docker installation and configuration
+   - This is required for text-to-speech functionality
+   - We recommend using Nabu Casa Cloud for reliable TTS and easy backup/restore
+
+6. Set up environment variables:
    - Create a `.env` file in the project root
    - Add your Home Assistant token:
      ```
      HOME_ASSISTANT_TOKEN=your_token_here
+     HOME_ASSISTANT_URL=http://localhost:8123
+     HOME_ASSISTANT_TTS_SERVICE=tts.cloud_say  # If using Nabu Casa Cloud
      ```
 
 ## Usage
@@ -90,12 +99,14 @@ python -m src.core.voice_loop
 - Voice interaction
 - Natural language querying of detection history
 - Cross-platform support (Linux, Windows)
-- Home Assistant integration
+- Home Assistant integration for TTS
 
 ## Documentation
 
 - [Data Setup Guide](docs/data_setup.md) - How to set up and generate test data
 - [Windows Setup Guide](docs/windows_setup.md) - Windows-specific setup instructions
+- [Home Assistant Setup Guide](docs/home_assistant_setup.md) - Docker setup and configuration
+- [Models Guide](models/README.md) - Information about model weights and setup
 - [Test Questions](docs/assistant_test_questions.txt) - Sample questions for testing
 
 ## Contributing
