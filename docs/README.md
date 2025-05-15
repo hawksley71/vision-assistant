@@ -10,13 +10,15 @@ vision-assistant/
 │   ├── core/              # Core functionality
 │   │   ├── assistant.py   # Main detection and voice assistant
 │   │   ├── voice_loop.py  # Voice interaction loop
+│   │   ├── openai_assistant.py  # OpenAI integration
 │   │   └── tts.py        # Text-to-speech utilities
 │   ├── models/            # ML models
 │   │   ├── yolov8_model.py
 │   │   └── base_model.py
 │   ├── utils/             # Utility functions
 │   │   ├── audio.py      # Audio device handling
-│   │   └── combine_logs.py
+│   │   ├── combine_logs.py
+│   │   └── openai_utils.py
 │   └── config/            # Configuration
 │       └── settings.py
 ├── data/                  # Data directory (not in git)
@@ -159,11 +161,9 @@ For Windows users, please refer to the detailed setup guide in `docs/windows_set
 - **voice_loop.py**: Manages the main loop for voice and detection, including query classification and routing.
 - **openai_assistant.py**: Handles OpenAI API integration for code interpreter and pattern analysis.
 - **tts.py**: Utility for sending TTS messages to Home Assistant.
-- **webhook.py**: (If used) Handles webhook integration for external triggers.
 
 ### src/utils/
 - **audio.py**: Cross-platform microphone selection and audio device utilities. Supports both Linux and Windows systems.
-- **mic_test.py**: Script to test and debug microphone input.
 - **openai_utils.py**: Helper functions for OpenAI API usage.
 - **combine_logs.py**: Combines daily detection logs into a single CSV for historical analysis.
 
