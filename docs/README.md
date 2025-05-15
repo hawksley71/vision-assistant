@@ -1,5 +1,102 @@
 # Vision-Aware Smart Assistant
 
+A smart assistant that uses computer vision to detect objects and answer questions about what it sees.
+
+## Project Structure
+
+```
+vision-assistant/
+├── src/                    # Source code
+│   ├── core/              # Core functionality
+│   ├── models/            # ML models
+│   ├── utils/             # Utility functions
+│   └── config/            # Configuration
+├── data/                  # Data directory (not in git)
+│   ├── raw/              # Raw detection logs
+│   ├── processed/        # Processed logs
+│   └── audio/            # Audio recordings
+├── docs/                  # Documentation
+│   ├── reports/          # Project reports (not in git)
+│   └── data_setup.md     # Data setup guide
+├── scripts/              # Utility scripts
+├── tests/                # Test files
+└── requirements.txt      # Python dependencies
+```
+
+## Setup
+
+### Prerequisites
+
+- Python 3.10 or higher
+- Git
+- Webcam
+- Microphone
+
+### Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/hawksley71/vision-assistant.git
+   cd vision-assistant
+   ```
+
+2. Create and activate a virtual environment:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # Linux/Mac
+   # or
+   .\venv\Scripts\activate  # Windows
+   ```
+
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Set up your data:
+   - See [Data Setup Guide](docs/data_setup.md) for instructions
+   - Generate test data using the provided scripts
+
+5. Set up environment variables:
+   - Create a `.env` file in the project root
+   - Add your Home Assistant token:
+     ```
+     HOME_ASSISTANT_TOKEN=your_token_here
+     ```
+
+## Usage
+
+Run the assistant:
+```bash
+python -m src.core.voice_loop
+```
+
+## Features
+
+- Real-time object detection using YOLOv8
+- Voice interaction
+- Natural language querying of detection history
+- Cross-platform support (Linux, Windows)
+- Home Assistant integration
+
+## Documentation
+
+- [Data Setup Guide](docs/data_setup.md) - How to set up and generate test data
+- [Windows Setup Guide](docs/windows_setup.md) - Windows-specific setup instructions
+- [Test Questions](docs/assistant_test_questions.txt) - Sample questions for testing
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
 ## Project Overview
 This project is a modular, voice-driven, vision-aware assistant that integrates live object detection (YOLOv8), historical log analysis, and natural language voice interaction. The system can answer both live and historical queries about detected objects, using the current camera feed and combined detection logs. It features robust intent detection, partial/fuzzy matching, and seamless integration with Home Assistant for text-to-speech (TTS) output.
 
