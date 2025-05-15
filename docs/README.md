@@ -8,19 +8,31 @@ A smart assistant that uses computer vision to detect objects and answer questio
 vision-assistant/
 ├── src/                    # Source code
 │   ├── core/              # Core functionality
+│   │   ├── assistant.py   # Main detection and voice assistant
+│   │   ├── voice_loop.py  # Voice interaction loop
+│   │   └── tts.py        # Text-to-speech utilities
 │   ├── models/            # ML models
+│   │   ├── yolov8_model.py
+│   │   └── base_model.py
 │   ├── utils/             # Utility functions
+│   │   ├── audio.py      # Audio device handling
+│   │   └── combine_logs.py
 │   └── config/            # Configuration
+│       └── settings.py
 ├── data/                  # Data directory (not in git)
 │   ├── raw/              # Raw detection logs
 │   ├── processed/        # Processed logs
 │   └── audio/            # Audio recordings
 ├── docs/                  # Documentation
 │   ├── reports/          # Project reports (not in git)
-│   └── data_setup.md     # Data setup guide
-├── scripts/              # Utility scripts
-├── tests/                # Test files
-└── requirements.txt      # Python dependencies
+│   ├── data_setup.md     # Data setup guide
+│   └── windows_setup.md  # Windows setup guide
+├── models/               # Model weights (not in git)
+│   ├── yolov8/          # YOLOv8 weights
+│   └── yolov5/          # YOLOv5 weights
+├── tools/               # Utility scripts
+│   └── generate_fake_logs.py
+└── requirements.txt     # Python dependencies
 ```
 
 ## Setup
