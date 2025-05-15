@@ -66,7 +66,6 @@ models/*.onnx
 
 # Keep model directories
 !models/yolov8/
-!models/yolov5/
 
 # Logs
 *.log
@@ -90,9 +89,6 @@ desktop.ini
 *.txt
 !requirements.txt
 !docs/assistant_test_questions.txt
-
-# YOLOv5
-yolov5/
 
 # Documentation
 docs/reports/

@@ -14,75 +14,74 @@ Usage:
 import os
 from pathlib import Path
 
-# Project root directory - automatically determined based on this file's location
+# Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
-# Directory paths configuration
-# All paths are relative to PROJECT_ROOT
+# Paths
 PATHS = {
     'data': {
-        'raw': os.path.join(PROJECT_ROOT, 'data', 'raw'),        # Raw detection logs
-        'processed': os.path.join(PROJECT_ROOT, 'data', 'processed'),  # Processed data files
-        'logs': os.path.join(PROJECT_ROOT, 'data', 'logs'),      # Application logs
-        'combined_logs': os.path.join(PROJECT_ROOT, 'data', 'processed', 'combined_logs.csv'),  # Combined detection logs
+        'raw': os.path.join(PROJECT_ROOT, 'data', 'raw'),
+        'processed': os.path.join(PROJECT_ROOT, 'data', 'processed'),
+        'audio': os.path.join(PROJECT_ROOT, 'data', 'audio'),
     },
     'models': {
-        'weights': os.path.join(PROJECT_ROOT, 'models', 'weights'),  # Model weights directory
-        'yolov5': os.path.join(PROJECT_ROOT, 'models', 'weights', 'yolov5s.pt'),  # YOLOv5 model path
-        'yolov8': os.path.join(PROJECT_ROOT, 'models', 'weights', 'yolov8n.pt'),  # YOLOv8 model path
+        'yolov8': os.path.join(PROJECT_ROOT, 'models', 'yolov8', 'yolov8n.pt'),  # YOLOv8 model path
     },
-    'outputs': {
-        'detections': os.path.join(PROJECT_ROOT, 'outputs', 'detections'),  # Detection results
-        'audio': os.path.join(PROJECT_ROOT, 'outputs', 'audio'),    # Generated audio files
-        'logs': os.path.join(PROJECT_ROOT, 'outputs', 'logs'),      # Output logs
-    },
-    'assets': {
-        'audio': os.path.join(PROJECT_ROOT, 'assets', 'audio'),     # Audio assets
-    }
+    'logs': os.path.join(PROJECT_ROOT, 'logs'),
 }
 
-# Model settings for object detection
+# Create directories if they don't exist
+for path in PATHS['data'].values():
+    os.makedirs(path, exist_ok=True)
+os.makedirs(PATHS['logs'], exist_ok=True)
+
+# Model settings
 MODEL_SETTINGS = {
     'yolov8': {
-        'confidence_threshold': 0.25,  # Minimum confidence score for detections (0.0 to 1.0)
-        'iou_threshold': 0.45,        # IoU threshold for non-maximum suppression (0.0 to 1.0)
-        'max_detections': 20,         # Maximum number of detections per frame
-        'device': 'cuda',             # Device to run inference on ('cuda' or 'cpu')
-    },
-    'yolov5': {
-        'confidence_threshold': 0.25,  # Minimum confidence score for detections (0.0 to 1.0)
-        'iou_threshold': 0.45,        # IoU threshold for non-maximum suppression (0.0 to 1.0)
-        'max_detections': 1000,       # Maximum number of detections per frame
-        'image_size': (640, 640),     # Input image size (width, height)
+        'conf_threshold': 0.25,  # Confidence threshold
+        'iou_threshold': 0.45,   # IoU threshold for NMS
+        'max_detections': 100,   # Maximum number of detections
+        'device': 'cpu',         # Device to run inference on
     }
 }
 
-# Camera settings for video capture
+# Camera settings
 CAMERA_SETTINGS = {
-    'width': 640,     # Camera capture width in pixels
-    'height': 480,    # Camera capture height in pixels
-    'fps': 10,        # Frames per second
+    'width': 640,
+    'height': 480,
+    'fps': 30,
+    'device': 0,  # Default camera device
 }
 
-# Logging settings for detection and application logs
-LOGGING_SETTINGS = {
-    'log_interval': 1.0,              # Interval between log entries in seconds
-    'max_labels_per_log': 3,          # Maximum number of labels to log per entry
-    'log_format': '%Y-%m-%d %H:%M:%S',  # Timestamp format for log files
-}
-
-# Audio settings for text-to-speech and playback
+# Audio settings
 AUDIO_SETTINGS = {
-    'language': 'en',                 # Language for text-to-speech
-    'audio_player': 'mpv',           # Audio player command ('mpv', 'vlc', 'aplay', etc.)
-    'intro_message': "Hello! I am your vision-aware assistant. I can see and detect objects in my view. Ask me what I see, or about past detections.",
+    'sample_rate': 16000,
+    'chunk_size': 1024,
+    'channels': 1,
+    'format': 'wav',
 }
 
-# Home Assistant integration settings
+# Home Assistant settings
 HOME_ASSISTANT = {
-    'url': 'http://localhost:8123',   # Home Assistant instance URL
-    'tts_service': 'tts.google_translate_say',  # Text-to-speech service to use
-    'media_player': 'media_player.den_speaker',  # Media player entity ID
+    'url': os.getenv('HOME_ASSISTANT_URL', 'http://localhost:8123'),
+    'token': os.getenv('HOME_ASSISTANT_TOKEN', ''),
+    'tts_service': 'tts.google_translate_say',
+    'tts_entity': 'media_player.living_room_speaker',
+}
+
+# OpenAI settings
+OPENAI = {
+    'api_key': os.getenv('OPENAI_API_KEY', ''),
+    'model': 'gpt-4-turbo-preview',
+    'temperature': 0.7,
+    'max_tokens': 1000,
+}
+
+# Logging settings
+LOGGING = {
+    'level': 'INFO',
+    'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    'file': os.path.join(PATHS['logs'], 'assistant.log'),
 }
 
 def create_directories():
@@ -108,15 +107,11 @@ log_dir = PATHS['data']['raw']
 
 # Accessing model settings
 conf_threshold = MODEL_SETTINGS['yolov8']['confidence_threshold']
-max_detections = MODEL_SETTINGS['yolov5']['max_detections']
+max_detections = MODEL_SETTINGS['yolov8']['max_detections']
 
 # Accessing camera settings
 camera_width = CAMERA_SETTINGS['width']
 camera_fps = CAMERA_SETTINGS['fps']
-
-# Accessing logging settings
-log_interval = LOGGING_SETTINGS['log_interval']
-timestamp_format = LOGGING_SETTINGS['log_format']
 
 # Accessing audio settings
 tts_language = AUDIO_SETTINGS['language']

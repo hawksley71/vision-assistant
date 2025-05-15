@@ -30,8 +30,7 @@ vision-assistant/
 │   ├── data_setup.md     # Data setup guide
 │   └── windows_setup.md  # Windows setup guide
 ├── models/               # Model weights (not in git)
-│   ├── yolov8/          # YOLOv8 weights
-│   └── yolov5/          # YOLOv5 weights
+│   └── yolov8/          # YOLOv8 weights
 ├── tools/               # Utility scripts
 │   └── generate_fake_logs.py
 └── requirements.txt     # Python dependencies
@@ -116,7 +115,7 @@ This project is a modular, voice-driven, vision-aware assistant that integrates 
 
 ## Technologies Used
 - **Python 3.10**
-- **YOLOv8/YOLOv5** for object detection
+- **YOLOv8** for object detection
 - **OpenAI API** for code interpreter and pattern analysis
 - **SpeechRecognition** and **gTTS** for voice input/output
 - **OpenCV** for camera and image processing
