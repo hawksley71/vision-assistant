@@ -1,72 +1,62 @@
 import cv2
 import numpy as np
 import torch
+import os
+from pathlib import Path
 from ultralytics import YOLO
 from .base_model import BaseModel
-from ..config.settings import PATHS, MODEL_SETTINGS
+from ..config.settings import MODEL_CONFIG
 
 class YOLOv8Model(BaseModel):
     """YOLOv8 model implementation."""
     
-    def __init__(self):
+    def __init__(self, model_name="yolov8n.pt"):
         """Initialize YOLOv8 model."""
-        # Load YOLOv8 model
-        model_path = PATHS['models']['yolov8']
-        settings = MODEL_SETTINGS['yolov8']
+        super().__init__()
+        self.model_name = model_name
+        self.model = self._load_model()
         
-        # Initialize model with GPU support
-        self.device = settings['device'] if torch.cuda.is_available() else 'cpu'
-        self.model = YOLO(model_path)
+    def _load_model(self):
+        """Load YOLOv8 model with local weights or download if needed."""
+        # Define paths
+        model_dir = Path("models/yolov8")
+        model_path = model_dir / self.model_name
         
-        # Set model parameters for faster inference
-        self.model.fuse()  # Fuse model layers
-        if self.device == 'cuda':
-            self.model.to(self.device)
-            self.model.model.half()  # Use half precision
+        # Create model directory if it doesn't exist
+        model_dir.mkdir(parents=True, exist_ok=True)
         
-        # Set inference parameters from config
-        self.conf = settings['confidence_threshold']
-        self.iou = settings['iou_threshold']
-        self.max_det = settings['max_detections']
+        # Try to load local weights first
+        if model_path.exists():
+            print(f"Loading local weights from {model_path}")
+            return YOLO(str(model_path))
+            
+        # Download if not found locally
+        print(f"Downloading {self.model_name}...")
+        model = YOLO(self.model_name)
+        
+        # Save the downloaded weights
+        model.save(str(model_path))
+        print(f"Saved weights to {model_path}")
+        
+        return model
         
     def detect(self, frame):
-        """Detect objects in a frame using YOLOv8.
+        """Run detection on a frame."""
+        results = self.model(frame, verbose=False)
+        return results[0]
         
-        Args:
-            frame (numpy.ndarray): Input frame in BGR format
-            
-        Returns:
-            list: List of detections, each containing:
-                - bbox: [x1, y1, x2, y2] coordinates
-                - confidence: float
-                - class_id: int
-                - class_name: str
-        """
-        # Do not normalize; pass frame as-is (uint8, 0-255)
-        pass
-        
-        # print(f"Frame shape: {frame.shape}, dtype: {frame.dtype}")
-        
-        frame = frame.astype(np.uint8)
-        
-        # Run inference with optimized parameters
-        results = self.model(frame, 
-                           verbose=False,
-                           conf=self.conf,
-                           iou=self.iou,
-                           max_det=self.max_det,
-                           device=self.device)[0]
-        
+    def get_detections(self, frame):
+        """Process frame and return detections in standard format."""
+        results = self.detect(frame)
         detections = []
         
         for r in results.boxes.data.tolist():
-            x1, y1, x2, y2, conf, class_id = r
-            class_name = results.names[int(class_id)]
+            x1, y1, x2, y2, score, class_id = r
             detections.append({
                 'bbox': [int(x1), int(y1), int(x2), int(y2)],
-                'confidence': float(conf),
-                'class_id': int(class_id),
-                'class_name': class_name
+                'score': float(score),
+                'class': int(class_id),
+                'class_name': results.names[int(class_id)]
             })
             
         return detections
@@ -83,7 +73,7 @@ class YOLOv8Model(BaseModel):
         """
         for det in detections:
             x1, y1, x2, y2 = det['bbox']
-            conf = det['confidence']
+            conf = det['score']
             class_name = det['class_name']
             
             # Draw box

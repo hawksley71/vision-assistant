@@ -32,19 +32,32 @@ ENV/
 *.swp
 *.swo
 
-# Project specific
+# Model weights
+models/*.pt
+models/*.pth
+models/*.weights
+models/*.onnx
+
+# Keep model directories
+!models/yolov8/
+!models/yolov5/
+
+# Logs
 *.log
+logs/
+
+# Environment variables
+.env
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Project specific
 *.csv
 *.json
 *.pkl
 *.h5
-*.pt
-*.pth
-*.onnx
-*.engine
-*.trt
-*.wts
-*.weights
 *.cfg
 *.names
 *.txt
@@ -64,11 +77,4 @@ assets/
 # Jupyter Notebooks
 *.ipynb
 .ipynb_checkpoints/
-*/.ipynb_checkpoints/
-
-# OS specific
-.DS_Store
-Thumbs.db
-
-# Environment variables
-.env 
+*/.ipynb_checkpoints/ 
