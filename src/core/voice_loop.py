@@ -10,30 +10,54 @@ from src.utils.audio import get_microphone
 import speech_recognition as sr
 from src.core.assistant import DetectionAssistant
 import re
-from src.config.settings import PATHS, CAMERA_SETTINGS, LOGGING, AUDIO_SETTINGS, HOME_ASSISTANT
+from collections import deque
+from src.config.settings import PATHS, CAMERA_SETTINGS, LOGGING, AUDIO_SETTINGS, HOME_ASSISTANT, MODEL_SETTINGS
 
 # Load environment variables
 load_dotenv()
 HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN")
 
+# Constants
+BUFFER_SIZE = 30  # Number of frames to keep in detection buffer
+
 def send_tts_to_ha(message):
-    """Send text to Home Assistant for TTS."""
-    url = "http://localhost:8123/api/services/tts/cloud_say"
+    """Send text to Home Assistant for TTS with retry logic."""
+    url = f"{HOME_ASSISTANT['url']}/api/services/tts/{HOME_ASSISTANT['tts_service'].split('.')[-1]}"
     headers = {
-        "Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}",
+        "Authorization": f"Bearer {HOME_ASSISTANT['token']}",
         "Content-Type": "application/json",
     }
     payload = {
-        "entity_id": "media_player.den_speaker",
+        "entity_id": HOME_ASSISTANT['tts_entity'],
         "message": message,
         "language": "en-US",
         "cache": False
     }
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        print(f"[DEBUG] TTS Response Status: {response.status_code}")
-    except Exception as e:
-        print(f"[DEBUG] Could not send message to Home Assistant: {e}")
+    
+    for attempt in range(HOME_ASSISTANT['tts_retry_attempts']):
+        try:
+            print(f"[DEBUG] TTS attempt {attempt + 1}/{HOME_ASSISTANT['tts_retry_attempts']}")
+            response = requests.post(url, headers=headers, json=payload, timeout=HOME_ASSISTANT['tts_timeout'])
+            print(f"[DEBUG] TTS Response Status: {response.status_code}")
+            
+            if response.status_code == 200:
+                print("[DEBUG] TTS request successful")
+                return True
+            else:
+                print(f"[DEBUG] TTS request failed with status {response.status_code}")
+                print(f"[DEBUG] Response: {response.text}")
+                
+        except requests.exceptions.Timeout:
+            print(f"[DEBUG] TTS request timed out after {HOME_ASSISTANT['tts_timeout']} seconds")
+        except Exception as e:
+            print(f"[DEBUG] TTS request failed: {str(e)}")
+        
+        if attempt < HOME_ASSISTANT['tts_retry_attempts'] - 1:
+            print("[DEBUG] Retrying TTS request...")
+            time.sleep(1)  # Wait before retry
+    
+    print("[DEBUG] All TTS attempts failed")
+    return False
 
 def clean_object_name(raw_name):
     stopwords = {
@@ -73,19 +97,21 @@ class VoiceLoop:
         
         print("[DEBUG] Initializing speech recognizer...")
         self.recognizer = sr.Recognizer()
-        # Adjust for ambient noise
+        # Adjust for ambient noise with shorter duration
         print("[DEBUG] Adjusting for ambient noise...")
         with self.mic as source:
-            self.recognizer.adjust_for_ambient_noise(source, duration=2)
+            self.recognizer.adjust_for_ambient_noise(source, duration=0.5)  # Reduced from 2 seconds
         print("[DEBUG] Ambient noise adjustment complete")
         
-        # Lower the energy threshold for better sensitivity
-        self.recognizer.energy_threshold = 1000  # Default is 300
+        # Optimize voice recognition settings
+        self.recognizer.energy_threshold = 1000  # Lower threshold for better sensitivity
         self.recognizer.dynamic_energy_threshold = True
         self.recognizer.pause_threshold = 0.8  # Shorter pause threshold
         
         print("[DEBUG] Initializing live detection assistant...")
         self.live_assistant = DetectionAssistant(self.mic)
+        # Initialize detection buffer using deque
+        self.live_assistant.detections_buffer = deque(maxlen=BUFFER_SIZE)
         print("[DEBUG] VoiceLoop initialization complete")
         self.voice_active = True
         self.voice_thread = None
@@ -269,27 +295,26 @@ class VoiceLoop:
                 time.sleep(1)  # Prevent tight loop on error
 
     def wait_for_intro_to_finish(self):
-        """Wait for the intro message to finish playing."""
-        url = "http://localhost:8123/api/states/media_player.den_speaker"
-        headers = {"Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}"}
-        intro_text = "Hello! I am your vision-aware assistant. I can see and detect objects in my view. Ask me what I see, or about past detections."
-        last_word = "detections"
+        """Wait for the intro TTS to finish playing."""
+        url = f"{HOME_ASSISTANT['url']}/api/states/{HOME_ASSISTANT['tts_entity']}"
+        headers = {"Authorization": f"Bearer {HOME_ASSISTANT['token']}"}
         
         print("[DEBUG] Waiting for intro message to finish...")
         for _ in range(20):  # Wait up to 10 seconds (20 * 0.5)
             try:
                 resp = requests.get(url, headers=headers, timeout=2)
-                state = resp.json()
-                if state.get("state") == "idle":
-                    # Check if the last word was played
-                    media_content_id = state.get("attributes", {}).get("media_content_id", "")
-                    if last_word in media_content_id:
+                if resp.status_code == 200:
+                    state = resp.json()
+                    if state.get("state") == "idle":
                         print("[DEBUG] Intro message finished playing")
-                        return
+                        return True
+                time.sleep(0.5)
             except Exception as e:
-                print(f"[DEBUG] Error polling media player state: {e}")
-            time.sleep(0.5)
-        print("[DEBUG] Timeout waiting for intro TTS to finish.")
+                print(f"[DEBUG] Error checking media player state: {e}")
+                time.sleep(0.5)
+        
+        print("[DEBUG] Timeout waiting for intro TTS to finish")
+        return False
 
     def start_intro_and_voice(self):
         """Start the intro message and voice thread."""
@@ -319,6 +344,84 @@ class VoiceLoop:
             import traceback
             traceback.print_exc()
 
+    def run_voice_loop(self):
+        """Run the main detection and voice loop."""
+        print("[DEBUG] Starting voice loop...")
+        
+        # Initialize microphone
+        try:
+            mic = get_microphone()
+            if not mic:
+                print("[ERROR] Failed to initialize microphone")
+                return
+            print("[DEBUG] Microphone initialized successfully")
+        except Exception as e:
+            print(f"[ERROR] Error initializing microphone: {e}")
+            return
+
+        # Initialize speech recognizer
+        recognizer = sr.Recognizer()
+        recognizer.energy_threshold = 4000
+        recognizer.dynamic_energy_threshold = True
+        
+        print("[DEBUG] Speech recognizer initialized")
+        print("[DEBUG] Listening for voice commands...")
+
+        while True:
+            try:
+                # Get frame and run detection
+                ret, frame = self.live_assistant.cap.read()
+                if not ret or frame is None:
+                    print("[DEBUG] No frame available")
+                    continue
+
+                # Run detection
+                detections = self.live_assistant.model.get_detections(frame)
+                if detections:
+                    self.live_assistant.latest_detections = detections
+                    self.live_assistant.detections_buffer.extend(detections)
+                    if len(self.live_assistant.detections_buffer) > BUFFER_SIZE:
+                        self.live_assistant.detections_buffer = self.live_assistant.detections_buffer[-BUFFER_SIZE:]
+
+                # Listen for voice command
+                with mic as source:
+                    print("[DEBUG] Adjusting for ambient noise...")
+                    recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                    print("[DEBUG] Listening...")
+                    audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
+
+                try:
+                    print("[DEBUG] Processing speech...")
+                    text = recognizer.recognize_google(audio)
+                    print(f"[DEBUG] Recognized: {text}")
+
+                    if "what do you see" in text.lower():
+                        print("[DEBUG] Processing 'what do you see' query")
+                        response = self.live_assistant.process_what_do_you_see()
+                        if response:
+                            print(f"[DEBUG] Sending TTS response: {response}")
+                            if not send_tts_to_ha(response):
+                                print("[ERROR] Failed to send TTS response")
+                        else:
+                            print("[DEBUG] No response generated for 'what do you see' query")
+
+                except sr.WaitTimeoutError:
+                    print("[DEBUG] No speech detected within timeout")
+                    continue
+                except sr.UnknownValueError:
+                    print("[DEBUG] Could not understand audio")
+                    continue
+                except sr.RequestError as e:
+                    print(f"[ERROR] Could not request results from speech recognition service: {e}")
+                    continue
+                except Exception as e:
+                    print(f"[ERROR] Unexpected error in voice loop: {e}")
+                    continue
+
+            except Exception as e:
+                print(f"[ERROR] Error in main loop: {e}")
+                continue
+
     def run(self):
         """Run the main detection and voice loop."""
         # Play intro and wait for it to finish before starting detection and voice
@@ -330,7 +433,7 @@ class VoiceLoop:
         self.wait_for_intro_to_finish()
         print("[DEBUG] Intro finished. Starting detection and voice threads.")
         # Start the voice assistant in a background thread
-        self.voice_thread = threading.Thread(target=self.voice_interaction_loop, daemon=True)
+        self.voice_thread = threading.Thread(target=self.run_voice_loop, daemon=True)
         self.voice_thread.start()
         print("[DEBUG] Voice thread started")
         # Now start the main detection loop
@@ -343,7 +446,7 @@ class VoiceLoop:
                 
             # Run detection
             try:
-                detections = self.live_assistant.model.detect(frame)
+                detections = self.live_assistant.model.get_detections(frame)
                 if detections:
                     print(f"[DEBUG] Detected objects: {[d['class_name'] for d in detections]}")
                 self.live_assistant.latest_detections = detections
@@ -354,7 +457,8 @@ class VoiceLoop:
                 
             # Draw detections
             try:
-                frame = self.live_assistant.model.draw_detections(frame, detections)
+                if detections:  # Only draw if we have detections
+                    frame = self.live_assistant.model.draw_detections(frame, detections)
             except Exception as e:
                 print(f"[DEBUG] Error drawing detections: {e}")
                 

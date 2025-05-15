@@ -5,14 +5,48 @@ from openai import OpenAI
 from dotenv import load_dotenv, find_dotenv
 import json
 
+# Define current_date at module level
+current_date = datetime.now().strftime("%Y-%m-%d")
+
 class OpenAIAssistantSession:
     """
     Manages an OpenAI assistant session for historical/pattern queries using the code interpreter tool.
     Handles file upload, assistant and thread creation, and message exchange.
     """
-    # Class-level cache for file IDs and assistant ID
+    # Class-level cache for file IDs, assistant ID, and thread ID
     _file_cache = {}
     _assistant_id = None
+    _thread_id = None
+    _cache_file = "openai_cache.json"
+    
+    @classmethod
+    def _load_cache(cls):
+        """Load cached IDs from file."""
+        try:
+            if os.path.exists(cls._cache_file):
+                with open(cls._cache_file, 'r') as f:
+                    cache = json.load(f)
+                    cls._assistant_id = cache.get('assistant_id')
+                    cls._thread_id = cache.get('thread_id')
+                    cls._file_cache = cache.get('file_cache', {})
+                    print(f"[DEBUG] Loaded cache: assistant_id={cls._assistant_id}, thread_id={cls._thread_id}")
+        except Exception as e:
+            print(f"[DEBUG] Error loading cache: {e}")
+    
+    @classmethod
+    def _save_cache(cls):
+        """Save cached IDs to file."""
+        try:
+            cache = {
+                'assistant_id': cls._assistant_id,
+                'thread_id': cls._thread_id,
+                'file_cache': cls._file_cache
+            }
+            with open(cls._cache_file, 'w') as f:
+                json.dump(cache, f)
+            print(f"[DEBUG] Saved cache: assistant_id={cls._assistant_id}, thread_id={cls._thread_id}")
+        except Exception as e:
+            print(f"[DEBUG] Error saving cache: {e}")
     
     def __init__(self, csv_path):
         """
@@ -20,6 +54,9 @@ class OpenAIAssistantSession:
         Args:
             csv_path (str): Path to the combined detection logs CSV file.
         """
+        # Load cached IDs
+        self._load_cache()
+        
         _ = load_dotenv(find_dotenv())
         api_key = os.getenv("OPENAI_TOKEN")
         print(f"[DEBUG] OpenAI API Key loaded: {api_key[:8]}...{api_key[-4:] if api_key else 'None'}")
@@ -59,6 +96,7 @@ class OpenAIAssistantSession:
                     self.file_id = file_obj.id
                     # Cache the file ID
                     self._file_cache[csv_path] = self.file_id
+                    self._save_cache()  # Save cache after updating file ID
                 print("[DEBUG] File uploaded successfully")
             except Exception as e:
                 print(f"[ERROR] Failed to upload file: {str(e)}")
@@ -86,20 +124,30 @@ class OpenAIAssistantSession:
                 tools=[{"type": "code_interpreter"}]
             )
             self._assistant_id = self.assistant.id
+            self._save_cache()  # Save cache after creating assistant
             print(f"[DEBUG] Created new assistant with ID: {self._assistant_id}")
         else:
             print(f"[DEBUG] Reusing existing assistant with ID: {self._assistant_id}")
             self.assistant = self.client.beta.assistants.retrieve(self._assistant_id)
         
-        # Create thread
-        self.thread = self.client.beta.threads.create()
-        # Attach the file to the thread with an initial message
-        self.client.beta.threads.messages.create(
-            thread_id=self.thread.id,
-            role="user",
-            content="Please load the attached detection log for future questions.",
-            attachments=[{"file_id": self.file_id, "tools": [{"type": "code_interpreter"}]}]
-        )
+        # Create or reuse thread
+        if self._thread_id is None:
+            print("[DEBUG] Creating new thread")
+            self.thread = self.client.beta.threads.create()
+            self._thread_id = self.thread.id
+            self._save_cache()  # Save cache after creating thread
+            print(f"[DEBUG] Created new thread with ID: {self._thread_id}")
+            
+            # Attach the file to the thread with an initial message
+            self.client.beta.threads.messages.create(
+                thread_id=self.thread.id,
+                role="user",
+                content="Please load the attached detection log for future questions.",
+                attachments=[{"file_id": self.file_id, "tools": [{"type": "code_interpreter"}]}]
+            )
+        else:
+            print(f"[DEBUG] Reusing existing thread with ID: {self._thread_id}")
+            self.thread = self.client.beta.threads.retrieve(self._thread_id)
 
     def ask_historical_question(self, user_input, last_object=None):
         """
@@ -150,39 +198,61 @@ def ask_openai(prompt, model="gpt-3.5-turbo", max_tokens=300, temperature=0.2):
     )
     return response.choices[0].message.content
 
-def parse_query_with_openai(query):
-    system_prompt = (
-        "You are an assistant that extracts structured intents from user queries about object detections. "
-        f"Today's date is {current_date}. Answer time-sensitive queries relative to this date."
-        "Return a JSON object with keys: 'intent' (choose from: 'live_view', 'detection_history', 'usual_time', 'frequency', 'days_absent', 'months_present', 'confidence') "
-        "and 'object' (the object of interest, e.g., 'bus', 'cat'). "
-        "If the query is about the live camera view, set intent to 'live_view'. "
-        "If the query is about whether an object has ever been seen or detected, set intent to 'detection_history'. "
-        "If the query is about confidence levels, set intent to 'confidence'. "
-        "If the query does not fit any of these, return intent as 'unknown'.\n\n"
-        "Example queries and their parsed intents:\n"
-        "- 'What do you see?' -> {'intent': 'live_view', 'object': None}\n"
-        "- 'Have you seen a cat?' -> {'intent': 'detection_history', 'object': 'cat'}\n"
-        "- 'When does the bus usually come?' -> {'intent': 'usual_time', 'object': 'bus'}\n"
-        "- 'How often does the mail truck come?' -> {'intent': 'frequency', 'object': 'mail truck'}\n"
-        "- 'Are there any days the bus doesn't come?' -> {'intent': 'days_absent', 'object': 'bus'}\n"
-        "- 'What months does the ice cream truck come?' -> {'intent': 'months_present', 'object': 'ice cream truck'}\n"
-        "- 'How confident are you?' -> {'intent': 'confidence', 'object': None}\n"
-        "- 'How sure are you about that?' -> {'intent': 'confidence', 'object': None}\n"
-        "- 'Have you seen' -> {'intent': 'unknown', 'object': None}\n"
-    )
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query}
-        ],
-        max_tokens=100,
-        temperature=0,
-    )
+def parse_query_with_openai(query: str, client) -> dict:
+    """
+    Parse a natural language query using OpenAI to determine intent and extract objects.
+    
+    Args:
+        query (str): The natural language query to parse
+        client: The OpenAI client instance
+        
+    Returns:
+        dict: A dictionary containing:
+            - intent: The detected intent (live_view, confidence, detection_history, etc.)
+            - object: The object being queried about (if any)
+    """
     try:
-        return json.loads(response.choices[0].message.content)
-    except Exception:
+        # Construct system prompt for intent extraction
+        system_prompt = """You are an intent classifier for a computer vision assistant. 
+        Classify the user's query into one of these intents:
+        - live_view: Questions about what is currently being seen
+        - confidence: Questions about detection confidence or certainty
+        - detection_history: Questions about when something was last seen
+        - usual_time: Questions about typical times something is seen
+        - frequency: Questions about how often something is seen
+        - days_absent: Questions about when something was not seen
+        - months_present: Questions about which months something was seen
+        - unknown: If the query doesn't match any other intent
+        
+        Also extract any object being queried about.
+        
+        Return your response as a JSON object with 'intent' and 'object' fields.
+        The object field should be null if no specific object is mentioned."""
+        
+        # Get response from OpenAI
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query}
+            ],
+            temperature=0.1,  # Lower temperature for more consistent results
+            max_tokens=150
+        )
+        
+        # Extract and parse the response
+        try:
+            result = json.loads(response.choices[0].message.content)
+            return {
+                "intent": result.get("intent", "unknown"),
+                "object": result.get("object")
+            }
+        except json.JSONDecodeError:
+            print(f"[DEBUG] Failed to parse OpenAI response as JSON: {response.choices[0].message.content}")
+            return {"intent": "unknown", "object": None}
+            
+    except Exception as e:
+        print(f"[DEBUG] Error in OpenAI query parsing: {e}")
         return {"intent": "unknown", "object": None}
 
 if __name__ == "__main__":

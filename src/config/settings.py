@@ -50,7 +50,7 @@ MODEL_SETTINGS = {
 CAMERA_SETTINGS = {
     'width': 640,
     'height': 480,
-    'fps': 30,
+    'fps': 5,  # Reduced from 30 to 5 for testing
     'device': 0,  # Default camera device
 }
 
@@ -66,8 +66,10 @@ AUDIO_SETTINGS = {
 HOME_ASSISTANT = {
     'url': os.getenv('HOME_ASSISTANT_URL', 'http://localhost:8123'),
     'token': os.getenv('HOME_ASSISTANT_TOKEN', ''),
-    'tts_service': 'tts.google_translate_say',
-    'tts_entity': 'media_player.living_room_speaker',
+    'tts_service': 'tts.cloud_say',
+    'tts_entity': 'media_player.den_speaker',
+    'tts_timeout': 30,
+    'tts_retry_attempts': 3,
 }
 
 # OpenAI settings
