@@ -21,7 +21,6 @@ graph TB
     
     %% Output Devices
     Display[Display Output]
-    TTS[Text-to-Speech]
     HA[Home Assistant]
     Speaker[Smart Speaker]
     
@@ -77,7 +76,7 @@ vision-assistant/
 │       └── settings.py
 ├── data/                  # Data directory (not in git)
 │   ├── raw/              # Raw detection logs
-│   └── processed/        # Processed logs
+│   └── processed/        # Processed detection logs (combined logs, pattern summaries)
 ├── docs/                  # Documentation
 │   ├── reports/          # Project reports (not in git)
 │   ├── data_setup.md     # Data setup guide
@@ -311,7 +310,7 @@ For Windows users, please refer to the detailed setup guide in `docs/windows_set
 
 ### Data Organization
 - **data/raw/**: Original detection logs
-- **data/processed/**: Combined and processed detection logs
+- **data/processed/**: Processed detection logs (combined logs, pattern summaries)
 - **data/logs/**: Application logs
 
 ### Other
@@ -533,8 +532,7 @@ The project uses a data generation system to create realistic test data. Here's 
 ```
 data/
 ├── raw/          # Raw detection logs
-├── processed/    # Processed detection data
-└── combined/     # Combined detection logs
+└── processed/    # Processed detection logs (combined logs, pattern summaries)
 ```
 
 ### Data Generation
@@ -547,8 +545,7 @@ data/
 
 ### Data Storage
 - Raw detection logs are stored in `data/raw/`
-- Processed data is stored in `data/processed/`
-- Combined logs are stored in `data/combined/`
+- Processed detection logs (combined logs, pattern summaries) are stored in `data/processed/`
 - All data directories are preserved in Git but their contents are ignored
 - Use the data generator to create test data locally
 
