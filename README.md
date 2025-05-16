@@ -41,7 +41,7 @@ graph TB
     %% Output Device Connections
     Assistant -->|Visual Feed| Display
     Assistant -->|Text Response| HA
-    HA -->|TTS| Speaker
+    HA -->|Text To Speech| Speaker
     
     %% Styling
     classDef input fill:#d4f1f9,stroke:#333,stroke-width:2px
