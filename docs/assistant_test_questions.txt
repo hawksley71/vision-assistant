@@ -131,4 +131,139 @@ mail truck:
 - What time do you usually see mail trucks?
 - Does the mail truck come on weekends?
 
+# Sample Questions for Testing the Vision Assistant
+
+## Live Detection Questions
+- "What do you see right now?"
+- "What objects are currently visible?"
+- "How many people do you see?"
+- "Is there a car in view?"
+- "What's the most confident detection right now?"
+
+## Historical Time-Based Questions
+- "When was the last time you saw a school bus?"
+- "When did you first see a mail truck today?"
+- "What time did you see the most people?"
+- "When was the last detection of a dog?"
+- "What was the earliest detection today?"
+
+## Count and Frequency Questions
+- "How many times have you seen a car today?"
+- "How many people have you detected this week?"
+- "What's the most common object you've seen today?"
+- "How many different types of vehicles have you seen?"
+- "What's the total number of animal detections this week?"
+
+## Pattern Recognition Questions
+- "What patterns have you noticed in the detections?"
+- "Do you see any regular patterns with the school bus?"
+- "When do you typically see the most activity?"
+- "Are there any unusual patterns in today's detections?"
+- "What's the busiest time of day for detections?"
+
+## Compound Object Questions
+- "Have you seen any mail trucks?"
+- "Did you detect a school bus?"
+- "When was the last time you saw a garbage truck?"
+- "How many UPS trucks have you seen today?"
+- "Have you noticed any ice cream trucks?"
+
+## Confidence and Quality Questions
+- "What was your most confident detection today?"
+- "Which objects do you detect most reliably?"
+- "What's the average confidence for person detections?"
+- "How confident are you about the school bus detections?"
+- "What's the highest confidence score you've recorded?"
+
+## Comparative Questions
+- "Do you see more cars or trucks?"
+- "Which appears more often, dogs or cats?"
+- "What's more common, people or vehicles?"
+- "Do you detect more animals in the morning or evening?"
+- "Which type of vehicle do you see most often?"
+
+## Time Window Questions
+- "What did you see in the last hour?"
+- "What objects were detected this morning?"
+- "What was the first thing you saw today?"
+- "What's the most recent detection?"
+- "What did you see between 2 PM and 4 PM?"
+
+## Multiple Object Questions
+- "When did you last see both a person and a car?"
+- "Have you seen any combinations of animals and vehicles?"
+- "What objects typically appear together?"
+- "When do you see the most variety of objects?"
+- "What's the most common combination of detections?"
+
+## Specific Object Variations
+- "Have you seen any children today?"
+- "Did you detect any women in the last hour?"
+- "How many men have you seen?"
+- "When was the last time you saw a boy?"
+- "Have you noticed any girls in the detections?"
+
+## Vehicle-Specific Questions
+- "When do the delivery trucks usually come?"
+- "How often do you see the mail truck?"
+- "What's the typical time for school bus appearances?"
+- "Have you seen any emergency vehicles?"
+- "When was the last time you saw a van?"
+
+## Animal-Specific Questions
+- "How many different types of animals have you seen?"
+- "When do you typically see squirrels?"
+- "Have you detected any raccoons at night?"
+- "What's the most common animal detection?"
+- "Do you see more birds in the morning or afternoon?"
+
+## Object Category Questions
+- "What types of vehicles have you seen?"
+- "How many different animals have you detected?"
+- "What kinds of people have you seen?"
+- "What types of furniture are in view?"
+- "What electronics have you detected?"
+
+## Pattern Analysis Questions
+- "What's the typical pattern for mail delivery?"
+- "When do you usually see the most activity?"
+- "Are there any regular schedules in the detections?"
+- "What's the busiest day of the week?"
+- "Do you notice any seasonal patterns?"
+
+## Confidence Analysis Questions
+- "What objects do you detect most accurately?"
+- "Which detections are you most confident about?"
+- "What's the average confidence for vehicle detections?"
+- "How reliable are your animal detections?"
+- "What's your highest confidence detection today?"
+
+## Time-Based Pattern Questions
+- "What's the typical pattern for morning detections?"
+- "When do you see the most activity during the day?"
+- "What's the pattern for evening detections?"
+- "Do you notice any patterns in overnight detections?"
+- "What's the busiest hour of the day?"
+
+## Object Relationship Questions
+- "What objects typically appear together?"
+- "Do you see any correlation between people and vehicles?"
+- "What's the most common combination of detections?"
+- "When do you see multiple types of vehicles?"
+- "What objects often appear with people?"
+
+## Detection Quality Questions
+- "How many high-confidence detections have you made?"
+- "What's the average confidence score today?"
+- "Which objects do you detect most reliably?"
+- "What's the highest confidence detection you've made?"
+- "How many low-confidence detections are there?"
+
+## Time Window Analysis
+- "What's the pattern of detections in the last hour?"
+- "How many detections have you made today?"
+- "What's the frequency of detections this week?"
+- "When do you see the most variety of objects?"
+- "What's the typical number of detections per hour?"
+
 ... (repeat for each SPECIAL_OBJECTS entry, using similar question templates and adjusting for unique rules, e.g., "Does the snow plow come in winter?", "How often does the recycling truck come?", "Does the ice cream truck come in July?", etc.) 

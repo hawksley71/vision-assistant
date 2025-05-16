@@ -67,9 +67,17 @@ models/*.onnx
 # Keep model directories
 !models/yolov8/
 
+# Data directories - preserve structure but ignore contents
+data/raw/*
+data/processed/*
+data/combined/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/combined/.gitkeep
+
 # Logs
-*.log
-logs/
+logs/*
+!logs/.gitkeep
 
 # Environment variables
 .env

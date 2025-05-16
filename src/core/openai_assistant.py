@@ -8,6 +8,22 @@ import json
 # Define current_date at module level
 current_date = datetime.now().strftime("%Y-%m-%d")
 
+def validate_api_key(api_key: str) -> bool:
+    """Validate OpenAI API key format."""
+    if not api_key:
+        return False
+    # OpenAI API keys start with 'sk-' and are 51 characters long
+    return api_key.startswith('sk-') and len(api_key) == 51
+
+def get_api_key() -> str:
+    """Get and validate OpenAI API key from environment."""
+    api_key = os.getenv("OPENAI_TOKEN")
+    if not api_key:
+        raise RuntimeError("Error: OPENAI_TOKEN not found in environment variables")
+    if not validate_api_key(api_key):
+        raise RuntimeError("Error: Invalid OpenAI API key format")
+    return api_key
+
 class OpenAIAssistantSession:
     """
     Manages an OpenAI assistant session for historical/pattern queries using the code interpreter tool.
@@ -57,30 +73,25 @@ class OpenAIAssistantSession:
         # Load cached IDs
         self._load_cache()
         
-        _ = load_dotenv(find_dotenv())
-        api_key = os.getenv("OPENAI_TOKEN")
-        print(f"[DEBUG] OpenAI API Key loaded: {api_key[:8]}...{api_key[-4:] if api_key else 'None'}")
-        print(f"[DEBUG] API Key length: {len(api_key) if api_key else 0}")
-        print(f"[DEBUG] API Key contains whitespace: {bool(api_key and any(c.isspace() for c in api_key))}")
-        
+        # Load and validate API key
         try:
-            self.client = OpenAI(
-                api_key=api_key,
-                default_headers={"OpenAI-Beta": "assistants=v2"}
-            )
+            api_key = get_api_key()
+            self.client = OpenAI(api_key=api_key)
             print("[DEBUG] OpenAI client initialized successfully")
-            
-            # Test basic API functionality
-            print("[DEBUG] Testing API key with basic API call...")
-            test_response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": "Say hello"}],
-                max_tokens=5
-            )
-            print("[DEBUG] Basic API test successful")
-            
         except Exception as e:
             print(f"[ERROR] Failed to initialize OpenAI client: {str(e)}")
+            raise
+
+        # Test API key with minimal request
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": "test"}],
+                max_tokens=5
+            )
+            print("[DEBUG] API key test successful")
+        except Exception as e:
+            print(f"[ERROR] API key test failed: {str(e)}")
             raise
         
         # Check if file is already uploaded

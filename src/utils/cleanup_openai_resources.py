@@ -5,8 +5,11 @@ import time
 
 def cleanup_openai_resources():
     """
-    Cleanup utility to delete all OpenAI assistants and files.
-    Keeps only the most recent assistant and its associated files.
+    Cleanup utility to delete all OpenAI resources:
+    - All assistants except the most recent one
+    - All files
+    - All threads
+    - All messages (will be deleted with their threads)
     """
     # Load environment variables
     load_dotenv()
@@ -53,6 +56,17 @@ def cleanup_openai_resources():
             print("\nAll other assistants deleted")
         else:
             print("\nNo 'AI Report Assistant' found")
+        
+        # List and delete all threads
+        threads = client.beta.threads.list()
+        print(f"\nFound {len(threads.data)} threads")
+        
+        for thread in threads.data:
+            print(f"Deleting thread: {thread.id}")
+            client.beta.threads.delete(thread.id)
+            time.sleep(1)  # Rate limiting
+        
+        print("\nAll threads deleted (this also deletes all messages)")
         
         # List all files
         files = client.files.list()

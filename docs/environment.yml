@@ -13,9 +13,16 @@ dependencies:
   - gtts
   - pip
   - pip:
-      - speechrecognition
-      - openai
-      - pyaudio
-      - mamba
-      - yolov8
-      - python-dateutil 
+    - speechrecognition
+    - openai
+    - pyaudio
+    - ultralytics  # for YOLOv8
+    - python-dateutil
+    - spellchecker
+    - pyspellchecker
+    - mamba  # for environment management
+    - homeassistant-api  # for Home Assistant integration
+    - python-homeassistant-api  # alternative Home Assistant client
+    - websockets  # required for Home Assistant
+    - aiohttp  # required for Home Assistant
+    - asyncio  # required for Home Assistant 

@@ -41,7 +41,7 @@ class TestResponseSystem(unittest.TestCase):
         
         # Test medium confidence
         med_conf = self.assistant.response_generator.format_confidence("chair", 0.75)
-        self.assertTrue(any(phrase in med_conf.lower() for phrase in ["moderately confident", "i believe", "i think"]))
+        self.assertTrue(any(phrase in med_conf.lower() for phrase in ["i think", "i believe", "it looks like"]))
         self.assertIn("75%", med_conf)
         
         # Test low confidence

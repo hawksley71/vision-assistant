@@ -12,6 +12,7 @@ from src.core.assistant import DetectionAssistant
 import re
 from collections import deque
 from src.config.settings import PATHS, CAMERA_SETTINGS, LOGGING, AUDIO_SETTINGS, HOME_ASSISTANT, MODEL_SETTINGS
+from src.core.tts import send_tts_to_ha, wait_for_tts_to_finish
 
 # Load environment variables
 load_dotenv()
@@ -19,45 +20,6 @@ HOME_ASSISTANT_TOKEN = os.getenv("HOME_ASSISTANT_TOKEN")
 
 # Constants
 BUFFER_SIZE = 30  # Number of frames to keep in detection buffer
-
-def send_tts_to_ha(message):
-    """Send text to Home Assistant for TTS with retry logic."""
-    url = f"{HOME_ASSISTANT['url']}/api/services/tts/{HOME_ASSISTANT['tts_service'].split('.')[-1]}"
-    headers = {
-        "Authorization": f"Bearer {HOME_ASSISTANT['token']}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "entity_id": HOME_ASSISTANT['tts_entity'],
-        "message": message,
-        "language": "en-US",
-        "cache": False
-    }
-    
-    for attempt in range(HOME_ASSISTANT['tts_retry_attempts']):
-        try:
-            print(f"[DEBUG] TTS attempt {attempt + 1}/{HOME_ASSISTANT['tts_retry_attempts']}")
-            response = requests.post(url, headers=headers, json=payload, timeout=HOME_ASSISTANT['tts_timeout'])
-            print(f"[DEBUG] TTS Response Status: {response.status_code}")
-            
-            if response.status_code == 200:
-                print("[DEBUG] TTS request successful")
-                return True
-            else:
-                print(f"[DEBUG] TTS request failed with status {response.status_code}")
-                print(f"[DEBUG] Response: {response.text}")
-                
-        except requests.exceptions.Timeout:
-            print(f"[DEBUG] TTS request timed out after {HOME_ASSISTANT['tts_timeout']} seconds")
-        except Exception as e:
-            print(f"[DEBUG] TTS request failed: {str(e)}")
-        
-        if attempt < HOME_ASSISTANT['tts_retry_attempts'] - 1:
-            print("[DEBUG] Retrying TTS request...")
-            time.sleep(1)  # Wait before retry
-    
-    print("[DEBUG] All TTS attempts failed")
-    return False
 
 def clean_object_name(raw_name):
     stopwords = {
