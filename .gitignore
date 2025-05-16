@@ -121,4 +121,8 @@ archive/
 deprecated/
 
 # Generated files
-assets/ 
+assets/
+
+# Ignore all test scripts, but keep the folder
+/tests/
+!tests/.gitkeep 

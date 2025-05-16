@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>System Architecture Diagram</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</head>
+<body>
+    <div class="mermaid">
+        graph TB
+            %% Input Devices
+            Camera[Camera Input]
+            Microphone[Microphone Input]
+            
+            %% Core Components
+            YOLO[YOLOv8 Model]
+            Assistant[Detection Assistant]
+            PatternAnalyzer[Pattern Analyzer]
+            OpenAI[OpenAI Client]
+            
+            %% Data Storage
+            DetectionLogs[(Detection Logs)]
+            PatternSummary[(Pattern Summary)]
+            
+            %% Output Devices
+            Display[Display Output]
+            HA[Home Assistant]
+            Speaker[Smart Speaker]
+            
+            %% Input Device Connections
+            Camera -->|Video Stream| YOLO
+            Microphone -->|Audio Input| Assistant
+            
+            %% Core Component Connections
+            YOLO -->|Detections| Assistant
+            Assistant -->|Pattern Analysis| PatternAnalyzer
+            Assistant -->|Query Processing| OpenAI
+            
+            %% Data Storage Connections
+            Assistant -->|Log Detections| DetectionLogs
+            PatternAnalyzer -->|Update Patterns| PatternSummary
+            DetectionLogs -->|Historical Data| PatternAnalyzer
+
+            %% Output Device Connections
+            Assistant -->|Visual Feed| Display
+            Assistant -->|Text Response| HA
+            HA -->|Text To Speech| Speaker
+            
+            %% Styling
+            classDef input fill:#d4f1f9,stroke:#333,stroke-width:2px
+            classDef core fill:#d5e8d4,stroke:#333,stroke-width:2px
+            classDef storage fill:#ffe6cc,stroke:#333,stroke-width:2px
+            classDef output fill:#fff2cc,stroke:#333,stroke-width:2px
+            
+            class Camera,Microphone input
+            class YOLO,Assistant,PatternAnalyzer,OpenAI core
+            class DetectionLogs,PatternSummary storage
+            class Display,TTS,HA,Speaker output
+    </div>
+</body>
+</html> 
