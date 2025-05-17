@@ -12,7 +12,7 @@ graph TB
     Microphone[Microphone Input]
     
     %% Core Components
-    YOLO[YOLOv8 Model]
+    CV [Computer Vision Model]
     Assistant[Detection Assistant]
     PatternAnalyzer[Pattern Analyzer]
     OpenAI[OpenAI Client]
@@ -27,11 +27,11 @@ graph TB
     Speaker[Smart Speaker]
     
     %% Input Device Connections
-    Camera -->|Video Stream| YOLO
+    Camera -->|Video Stream| CV
     Microphone -->|Audio Input| Assistant
     
     %% Core Component Connections
-    YOLO -->|Detections| Assistant
+    CV -->|Detections| Assistant
     Assistant -->|Pattern Analysis| PatternAnalyzer
     Assistant -->|Query Processing| OpenAI
     
@@ -52,7 +52,7 @@ graph TB
     classDef output fill:#fff2cc,stroke:#333,stroke-width:2px
     
     class Camera,Microphone input
-    class YOLO,Assistant,PatternAnalyzer,OpenAI core
+    class CV,Assistant,PatternAnalyzer,OpenAI core
     class DetectionLogs,PatternSummary storage
     class Display,TTS,HA,Speaker output
 ```
