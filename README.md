@@ -2,6 +2,8 @@
 
 A smart assistant that uses computer vision and natural language processing to detect and respond to objects in its environment.
 
+<img src="vision_aware_assistant.png" alt="Vision Assistant Demo" width="250"/>
+
 ## System Architecture
 ```mermaid
 graph TB
