@@ -64,6 +64,7 @@ vision-assistant/
 │   │   ├── assistant.py   # Main detection and voice assistant
 │   │   ├── voice_loop.py  # Voice interaction loop
 │   │   ├── openai_assistant.py  # OpenAI integration
+│   │   ├── camera.py      # Camera initialization and frame capture
 │   │   └── tts.py        # Text-to-speech utilities
 │   ├── models/            # ML models
 │   │   ├── yolov8_model.py
@@ -86,7 +87,13 @@ vision-assistant/
 │   └── yolov8/          # YOLOv8 weights
 ├── tools/               # Utility scripts
 │   └── generate_fake_logs.py
-└── requirements.txt     # Python dependencies
+├── setup.py               # Project setup and installation script
+├── run_assistant.py       # Main script to run the assistant
+├── tests/                 # Test files and test data
+├── .gitignore             # Git ignore rules
+├── openai_cache.json      # Cache for OpenAI API responses
+├── yolov8n.pt             # YOLOv8 model weights
+└── requirements.txt       # Python dependencies
 ```
 
 ## Setup
@@ -158,29 +165,15 @@ vision-assistant/
 
 ## Running the Assistant
 
-1. Start Home Assistant (if using local instance):
-   ```bash
-   docker run -d \
-     --name homeassistant \
-     --privileged \
-     --restart=unless-stopped \
-     -e TZ=your_timezone \
-     -v ~/.homeassistant:/config \
-     --network=host \
-     ghcr.io/home-assistant/home-assistant:stable
-   ```
+To run the assistant, navigate to the project root directory (where the `src` folder is located) and use the following command:
 
-2. Run the assistant:
-   ```bash
-   python run_assistant.py
-   ```
+```bash
+python -m src.core.assistant
+```
 
-3. Interact with the assistant using voice commands:
-   - "What do you see right now?"
-   - "When do you usually see the bus?"
-   - "What time does the bus come?"
-   - "Is there a regular pattern for bus detections?"
-   - "What patterns have you noticed in the detections?"
+This will start the assistant, which handles microphone initialization, error handling, and cleanup automatically.
+
+**Note:** The Windows version of this project uses a different approach.
 
 ## Data Generation and Management
 
@@ -289,6 +282,7 @@ For Windows users, please refer to the detailed setup guide in `docs/windows_set
 - **assistant.py**: Main detection and voice assistant logic. Handles camera, detection buffer, query routing, and TTS output. Inputs: camera frames, voice input. Outputs: TTS responses, detection logs.
 - **voice_loop.py**: Manages the main loop for voice and detection, including query classification and routing.
 - **openai_assistant.py**: Handles OpenAI API integration for code interpreter and pattern analysis.
+- **camera.py**: Camera initialization and frame capture.
 - **tts.py**: Utility for sending TTS messages to Home Assistant.
 
 ### src/utils/
