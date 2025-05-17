@@ -12,7 +12,7 @@ graph TB
     Microphone[Microphone Input]
     
     %% Core Components
-    CV [Computer Vision Model]
+    CV[Computer Vision Model]
     Assistant[Detection Assistant]
     PatternAnalyzer[Pattern Analyzer]
     OpenAI[OpenAI Client]
@@ -43,7 +43,7 @@ graph TB
     %% Output Device Connections
     Assistant -->|Visual Feed| Display
     Assistant -->|Text Response| HA
-    HA -->|Text To Speech| Speaker
+    HA -->|TTS| Speaker
     
     %% Styling
     classDef input fill:#d4f1f9,stroke:#333,stroke-width:2px
@@ -54,7 +54,7 @@ graph TB
     class Camera,Microphone input
     class CV,Assistant,PatternAnalyzer,OpenAI core
     class DetectionLogs,PatternSummary storage
-    class Display,TTS,HA,Speaker output
+    class Display,HA,Speaker output
 ```
 
 ## Project Structure
