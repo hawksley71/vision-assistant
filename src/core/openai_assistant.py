@@ -64,6 +64,40 @@ class OpenAIAssistantSession:
         except Exception as e:
             print(f"[DEBUG] Error saving cache: {e}")
     
+    def _wait_for_file_processing(self, file_id, max_retries=10, delay=2):
+        """Wait for a file to be processed and ready for use."""
+        for i in range(max_retries):
+            try:
+                file = self.client.files.retrieve(file_id)
+                if file.status == 'processed':
+                    print(f"[DEBUG] File {file_id} is ready for use")
+                    return True
+                elif file.status == 'error':
+                    raise RuntimeError(f"File processing failed: {file.status_details}")
+                print(f"[DEBUG] Waiting for file {file_id} to be processed... (attempt {i+1}/{max_retries})")
+                time.sleep(delay)
+            except Exception as e:
+                print(f"[ERROR] Error checking file status: {e}")
+                time.sleep(delay)
+        raise RuntimeError(f"File {file_id} failed to process within {max_retries * delay} seconds")
+
+    def _upload_new_file(self, csv_path):
+        """Helper method to upload a new file."""
+        print("[DEBUG] Uploading new file")
+        try:
+            with open(csv_path, "rb") as f:
+                file_obj = self.client.files.create(file=f, purpose="assistants")
+                self.file_id = file_obj.id
+                # Cache the file ID
+                self._file_cache[csv_path] = self.file_id
+                self._save_cache()  # Save cache after updating file ID
+            print("[DEBUG] File uploaded successfully")
+            # Wait for file to be processed
+            self._wait_for_file_processing(self.file_id)
+        except Exception as e:
+            print(f"[ERROR] Failed to upload file: {str(e)}")
+            raise
+
     def __init__(self, csv_path):
         """
         Initialize the session: load API key, upload CSV, create assistant and thread, attach file to thread.
@@ -94,23 +128,43 @@ class OpenAIAssistantSession:
             print(f"[ERROR] API key test failed: {str(e)}")
             raise
         
-        # Check if file is already uploaded
-        if csv_path in self._file_cache:
-            print("[DEBUG] Reusing existing file ID from cache")
-            self.file_id = self._file_cache[csv_path]
-        else:
-            print("[DEBUG] Uploading new file")
-            try:
-                # Upload CSV file
-                with open(csv_path, "rb") as f:
-                    file_obj = self.client.files.create(file=f, purpose="assistants")
-                    self.file_id = file_obj.id
-                    # Cache the file ID
+        # Check for existing files first
+        try:
+            existing_files = self.client.files.list()
+            combined_logs_files = [f for f in existing_files.data if f.filename == 'combined_logs.csv']
+            
+            if combined_logs_files:
+                # Get the most recent file
+                latest_file = max(combined_logs_files, key=lambda x: x.created_at)
+                file_age = time.time() - latest_file.created_at
+                
+                # If file is less than 2 hours old, use it
+                if file_age < 7200:  # 7200 seconds = 2 hours
+                    print(f"[DEBUG] Using existing file (ID: {latest_file.id}) that is {int(file_age/60)} minutes old")
+                    self.file_id = latest_file.id
+                    # Verify the file is still processed and ready
+                    self._wait_for_file_processing(self.file_id)
                     self._file_cache[csv_path] = self.file_id
-                    self._save_cache()  # Save cache after updating file ID
-                print("[DEBUG] File uploaded successfully")
-            except Exception as e:
-                print(f"[ERROR] Failed to upload file: {str(e)}")
+                    self._save_cache()
+                else:
+                    # Delete old files and upload new one
+                    for file in combined_logs_files:
+                        try:
+                            print(f"[DEBUG] Deleting old file (ID: {file.id})")
+                            self.client.files.delete(file.id)
+                        except Exception as e:
+                            print(f"[WARNING] Failed to delete old file {file.id}: {e}")
+                            continue
+                    self._upload_new_file(csv_path)
+            else:
+                self._upload_new_file(csv_path)
+        except Exception as e:
+            print(f"[ERROR] Failed to check existing files: {e}")
+            # If we can't check existing files, try to upload a new one
+            try:
+                self._upload_new_file(csv_path)
+            except Exception as upload_error:
+                print(f"[ERROR] Failed to upload new file: {upload_error}")
                 raise
         
         # Create or reuse assistant
@@ -128,37 +182,59 @@ class OpenAIAssistantSession:
                 "If a user asks about an object and you do not find an exact match for the object name in the logs, "
                 "search for partial string matches (case-insensitive) in the object labels. If you find up to three close matches, suggest them to the user as possible intended objects. "
             )
-            self.assistant = self.client.beta.assistants.create(
-                name="AI Report Assistant",
-                instructions=instructions,
-                model="gpt-4o",
-                tools=[{"type": "code_interpreter"}]
-            )
-            self._assistant_id = self.assistant.id
-            self._save_cache()  # Save cache after creating assistant
-            print(f"[DEBUG] Created new assistant with ID: {self._assistant_id}")
+            try:
+                self.assistant = self.client.beta.assistants.create(
+                    name="AI Report Assistant",
+                    instructions=instructions,
+                    model="gpt-4",
+                    tools=[{"type": "code_interpreter"}]
+                )
+                self._assistant_id = self.assistant.id
+                self._save_cache()  # Save cache after creating assistant
+                print(f"[DEBUG] Created new assistant with ID: {self._assistant_id}")
+            except Exception as e:
+                print(f"[ERROR] Failed to create assistant: {e}")
+                raise
         else:
             print(f"[DEBUG] Reusing existing assistant with ID: {self._assistant_id}")
-            self.assistant = self.client.beta.assistants.retrieve(self._assistant_id)
+            try:
+                self.assistant = self.client.beta.assistants.retrieve(self._assistant_id)
+            except Exception as e:
+                print(f"[ERROR] Failed to retrieve assistant: {e}")
+                # If retrieval fails, create a new assistant
+                self._assistant_id = None
+                self.__init__(csv_path)
+                return
         
         # Create or reuse thread
         if self._thread_id is None:
             print("[DEBUG] Creating new thread")
-            self.thread = self.client.beta.threads.create()
-            self._thread_id = self.thread.id
-            self._save_cache()  # Save cache after creating thread
-            print(f"[DEBUG] Created new thread with ID: {self._thread_id}")
-            
-            # Attach the file to the thread with an initial message
-            self.client.beta.threads.messages.create(
-                thread_id=self.thread.id,
-                role="user",
-                content="Please load the attached detection log for future questions.",
-                attachments=[{"file_id": self.file_id, "tools": [{"type": "code_interpreter"}]}]
-            )
+            try:
+                self.thread = self.client.beta.threads.create()
+                self._thread_id = self.thread.id
+                self._save_cache()  # Save cache after creating thread
+                print(f"[DEBUG] Created new thread with ID: {self._thread_id}")
+                
+                # Attach the file to the thread with an initial message
+                self.client.beta.threads.messages.create(
+                    thread_id=self.thread.id,
+                    role="user",
+                    content="Please load the attached detection log for future questions.",
+                    attachments=[{"file_id": self.file_id, "tools": [{"type": "code_interpreter"}]}]
+                )
+            except Exception as e:
+                print(f"[ERROR] Failed to create thread: {e}")
+                raise
         else:
             print(f"[DEBUG] Reusing existing thread with ID: {self._thread_id}")
-            self.thread = self.client.beta.threads.retrieve(self._thread_id)
+            try:
+                self.thread = self.client.beta.threads.retrieve(self._thread_id)
+            except Exception as e:
+                print(f"[ERROR] Failed to retrieve thread: {e}")
+                # If retrieval fails, create a new thread
+                self._thread_id = None
+                self.__init__(csv_path)
+                return
 
     def ask_historical_question(self, user_input, last_object=None):
         """

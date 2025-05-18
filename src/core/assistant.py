@@ -12,6 +12,7 @@ from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Union
 import ast
+from pathlib import Path
 
 # Third-party library imports
 import cv2
@@ -31,6 +32,8 @@ from src.models.yolov8_model import YOLOv8Model
 from src.utils.audio import get_microphone
 from src.core.openai_assistant import ask_openai, parse_query_with_openai
 from src.core.tts import send_tts_to_ha, wait_for_tts_to_finish
+from src.core.camera import Camera
+from src.utils.pattern_analyzer import PatternAnalyzer, generate_pattern_summary
 
 # Suppress ALSA and other audio library warnings
 os.environ["PYTHONWARNINGS"] = "ignore"
@@ -180,7 +183,7 @@ class ContextualResponseGenerator(ResponseGenerator):
         return f"I'm not very certain ({percent_conf}%), but I think I saw {self._add_article(label)}"
 
 class DetectionAssistant:
-    def __init__(self, mic, response_style: str = "natural"):
+    def __init__(self, mic, response_style: str = "natural", camera=None):
         with _assistant_lock:
             # Initialize response generator based on style
             self.response_generators = {
@@ -196,16 +199,25 @@ class DetectionAssistant:
             # Initialize spell checker
             self.spell = SpellChecker()
             
-            # Update pattern summary on initialization
-            self.update_pattern_summary_if_needed()
+            # Initialize pattern analyzer
+            self.pattern_analyzer = PatternAnalyzer()
+            self.pattern_summary = None
+            self._load_pattern_summary()
+            
+            # Initialize other components
+            self.mic = mic
+            self.camera = camera
+            self.buffer = deque(maxlen=100)
+            self.last_reported_time = None
+            self.last_reported_labels = set()
+            self.pending_detections = []
+            self.clarification_needed = False
+            self.last_query = None
+            self.last_object = None
             
         # Initialize camera
-        self.cap = cv2.VideoCapture(0)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_SETTINGS['width'])
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_SETTINGS['height'])
-        self.cap.set(cv2.CAP_PROP_FPS, CAMERA_SETTINGS['fps'])
-        if not self.cap.isOpened():
-            raise RuntimeError("Error: Could not open camera")
+        self.camera = camera if camera is not None else Camera()
+        self.cap = self.camera.cap
 
         # Initialize OpenAI client
         _ = load_dotenv(find_dotenv())
@@ -292,6 +304,25 @@ class DetectionAssistant:
 
         self.show_feed = False  # New flag to control when to show the camera feed
 
+        # PATCH: Initialize last_detected_object for context/pronoun handling
+        self.last_detected_object = None
+        # PATCH: For testing, if data/raw/detections_test.csv exists, use it for log loading
+        self._test_log_path = os.path.join(PATHS['data']['raw'], 'detections_test.csv') if os.path.exists(os.path.join(PATHS['data']['raw'], 'detections_test.csv')) else None
+
+    def _load_pattern_summary(self):
+        """Load the pattern summary if it exists."""
+        pattern_summary_path = Path(__file__).parent.parent.parent / 'data' / 'processed' / 'pattern_summary.json'
+        if pattern_summary_path.exists():
+            with open(pattern_summary_path, 'r') as f:
+                self.pattern_summary = json.load(f)
+                
+    def _update_pattern_summary(self):
+        """Update the pattern summary with latest data."""
+        df = self.load_combined_logs()
+        if not df.empty:
+            generate_pattern_summary(df)
+            self._load_pattern_summary()
+            
     def sanitize_filename(self, name):
         return re.sub(r'[^A-Za-z0-9]+', '_', name)
 
@@ -557,52 +588,143 @@ class DetectionAssistant:
             return self.spell.correction(word)
         return word
 
-    def normalize_object_label(self, label):
-        """Normalize and correct spelling of object labels."""
-        # Remove all leading articles and extra spaces, and lowercase
-        normalized = re.sub(r'^(a |an |the )+', '', label.strip(), flags=re.IGNORECASE).strip().lower()
-        # Correct spelling
-        return self.correct_spelling(normalized)
+    def get_known_objects(self) -> set:
+        """Extract a set of all known object names from the logs."""
+        try:
+            df = self.load_all_logs()
+            if df.empty:
+                return set()
+            
+            # Get unique objects from all label columns
+            known_objects = set()
+            for col in ['label_1', 'label_2', 'label_3']:
+                known_objects.update(df[col].dropna().unique())
+            
+            # Also check current detections
+            if self.detections_buffer:
+                known_objects.update(d['class_name'] for d in self.detections_buffer)
+            
+            return known_objects
+        except Exception as e:
+            print(f"[ERROR] Failed to get known objects: {e}")
+            return set()
 
-    def load_all_logs(self, log_dir="data/raw"):
-        """Load all detection logs from the specified directory."""
-        # print(f"[DEBUG] Loading logs from: {log_dir}")
-        all_dfs = []
-        
-        # Ensure the directory exists
-        if not os.path.exists(log_dir):
-            # print(f"[DEBUG] Log directory {log_dir} does not exist")
-            return pd.DataFrame()
+    def normalize_object_label(self, label: str) -> str:
+        """Normalize an object label to handle common variations."""
+        if not label:
+            return label
             
-        # Get all CSV files in the directory
-        log_files = [f for f in os.listdir(log_dir) if f.endswith('.csv')]
-        # print(f"[DEBUG] Found {len(log_files)} log files: {log_files}")
+        # Convert to lowercase and strip whitespace
+        label = label.lower().strip()
         
-        for f in log_files:
-            try:
-                file_path = os.path.join(log_dir, f)
-                # print(f"[DEBUG] Loading log file: {file_path}")
-                df = pd.read_csv(file_path)
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                all_dfs.append(df)
-                # print(f"[DEBUG] Successfully loaded {len(df)} rows from {f}")
-            except Exception as e:
-                # print(f"[DEBUG] Error loading {f}: {str(e)}")
-                continue
+        # Handle common variations
+        variations = {
+            'buses': 'bus',
+            'busses': 'bus',
+            'trucks': 'truck',
+            'cars': 'car',
+            'dogs': 'dog',
+            'cats': 'cat',
+            'birds': 'bird',
+            'people': 'person',
+            'persons': 'person',
+            'humans': 'person',
+            'vehicles': 'vehicle',
+            'animals': 'animal'
+        }
+        
+        # Check for exact matches in variations
+        if label in variations:
+            return variations[label]
+            
+        # Check for known objects that might be similar
+        known_objects = self.get_known_objects()
+        if known_objects:
+            # Try to find exact match first
+            if label in known_objects:
+                return label
                 
-        if not all_dfs:
-            # print("[DEBUG] No valid log files found")
-            return pd.DataFrame()
-            
-        # Combine all dataframes
-        combined_df = pd.concat(all_dfs, ignore_index=True)
-        # print(f"[DEBUG] Combined {len(combined_df)} total rows from {len(all_dfs)} files")
-        return combined_df
+            # Try to find similar objects
+            similar = self.find_similar_objects(label)
+            if similar:
+                return similar[0]  # Return the most similar match
+                
+        return label
+
+    def find_similar_objects(self, partial_label: str, max_suggestions: int = 3) -> List[str]:
+        """Find similar objects from known objects list."""
+        known_objects = self.get_known_objects()
+        if not known_objects:
+            return []
+        
+        # Convert to lowercase for comparison
+        partial_label = partial_label.lower()
+        known_objects_lower = {obj.lower(): obj for obj in known_objects}
+        
+        # Find matches
+        matches = []
+        
+        # First try exact matches
+        for obj_lower, obj in known_objects_lower.items():
+            if partial_label in obj_lower or obj_lower in partial_label:
+                matches.append(obj)
+                if len(matches) >= max_suggestions:
+                    return matches
+        
+        # Then try fuzzy matching
+        if len(matches) < max_suggestions:
+            fuzzy_matches = difflib.get_close_matches(
+                partial_label,
+                [obj.lower() for obj in known_objects if obj not in matches],
+                n=max_suggestions - len(matches),
+                cutoff=0.6
+            )
+            for match in fuzzy_matches:
+                for obj in known_objects:
+                    if obj.lower() == match and obj not in matches:
+                        matches.append(obj)
+                        break
+        
+        return matches
+
+    def load_all_logs(self):
+        """Load all detection logs as a DataFrame."""
+        try:
+            # Try to load the combined logs file
+            df = pd.read_csv(PATHS['data']['combined_logs'], parse_dates=['timestamp'])
+            print(f"[DEBUG] Loaded {len(df)} rows from combined logs")
+            return df
+        except Exception as e:
+            print(f"[DEBUG] Error loading combined logs: {e}")
+            # Return empty DataFrame if file not found or error
+            return pd.DataFrame(columns=[
+                "timestamp",
+                "label_1", "count_1", "avg_conf_1",
+                "label_2", "count_2", "avg_conf_2",
+                "label_3", "count_3", "avg_conf_3"
+            ])
 
     def write_combined_logs_for_debug(self, df):
         output_path = PATHS['data']['combined_logs']
         df.to_csv(output_path, index=False)
         print(f"Debug: Combined logs written to {output_path}")
+
+    def _wait_for_file_processing(self, file_id, max_retries=10, delay=2):
+        """Wait for a file to be processed and ready for use."""
+        for i in range(max_retries):
+            try:
+                file = self.openai_client.files.retrieve(file_id)
+                if file.status == 'processed':
+                    print(f"[DEBUG] File {file_id} is ready for use")
+                    return True
+                elif file.status == 'error':
+                    raise RuntimeError(f"File processing failed: {file.status_details}")
+                print(f"[DEBUG] Waiting for file {file_id} to be processed... (attempt {i+1}/{max_retries})")
+                time.sleep(delay)
+            except Exception as e:
+                print(f"[ERROR] Error checking file status: {e}")
+                time.sleep(delay)
+        raise RuntimeError(f"File {file_id} failed to process within {max_retries * delay} seconds")
 
     def write_combined_logs_once_per_day(self, force=False):
         with _combined_logs_lock:
@@ -611,9 +733,63 @@ class DetectionAssistant:
             if df.empty:
                 return
             latest_date = df['timestamp'].max().date()
+            
+            # Check for existing files
+            try:
+                existing_files = self.openai_client.files.list()
+                combined_logs_files = [f for f in existing_files.data if f.filename == 'combined_logs.csv']
+                
+                if combined_logs_files:
+                    # Get the most recent file
+                    latest_file = max(combined_logs_files, key=lambda x: x.created_at)
+                    file_age = time.time() - latest_file.created_at
+                    
+                    # If file is less than 2 hours old and not forced, don't upload
+                    if file_age < 7200 and not force:  # 7200 seconds = 2 hours
+                        print(f"[DEBUG] Using existing file (ID: {latest_file.id}) that is {int(file_age/60)} minutes old")
+                        # Verify the file is still processed and ready
+                        self._wait_for_file_processing(latest_file.id)
+                        return
+                    
+                    # Delete old files
+                    for file in combined_logs_files:
+                        try:
+                            print(f"[DEBUG] Deleting old file (ID: {file.id})")
+                            self.openai_client.files.delete(file.id)
+                        except Exception as e:
+                            print(f"[WARNING] Failed to delete old file {file.id}: {e}")
+                            continue
+            except Exception as e:
+                print(f"[ERROR] Failed to check existing files: {e}")
+                # If we can't check existing files, proceed with upload if forced or date changed
+                if not force and self.last_combined_log_date == latest_date:
+                    return
+            
+            # Only proceed with upload if forced or date changed
             if force or self.last_combined_log_date != latest_date:
-                self.write_combined_logs_for_debug(df)
-                self.last_combined_log_date = latest_date
+                # Write to local file first
+                try:
+                    self.write_combined_logs_for_debug(df)
+                    self.last_combined_log_date = latest_date
+                except Exception as e:
+                    print(f"[ERROR] Failed to write local combined logs: {e}")
+                    return
+                
+                # Upload to OpenAI
+                try:
+                    print("[DEBUG] Uploading combined logs to OpenAI...")
+                    with open(PATHS['data']['combined_logs'], "rb") as f:
+                        file_obj = self.openai_client.files.create(file=f, purpose="assistants")
+                        print(f"[DEBUG] File uploaded successfully with ID: {file_obj.id}")
+                        # Wait for file to be processed
+                        self._wait_for_file_processing(file_obj.id)
+                except Exception as e:
+                    print(f"[ERROR] Failed to upload file to OpenAI: {e}")
+                    # Don't raise the exception, just log it and continue
+                    # This prevents the program from crashing if the upload fails
+
+        # After writing logs, update pattern summary
+        self._update_pattern_summary()
 
     def format_timestamp(self, timestamp):
         """Format timestamp in a natural way, using weekday names for current week."""
@@ -739,24 +915,6 @@ Respond with either 'all' or 'three'."""
             (all_logs['label_3'].fillna('').str.lower() == obj.lower())
         ]
         
-        # If no exact match, try compound word matching
-        if len(matches) == 0 and ' ' in obj:
-            # Split the compound word
-            parts = obj.split()
-            # Find objects that contain all parts of the compound word
-            potential_matches = []
-            for col in ['label_1', 'label_2', 'label_3']:
-                for label in all_logs[col].dropna().unique():
-                    if all(part.lower() in label.lower() for part in parts):
-                        potential_matches.append(label)
-            
-            if potential_matches:
-                # Get the top three most detected matches
-                top_matches = sorted(potential_matches, key=lambda x: len(all_logs[all_logs[col] == x]), reverse=True)[:3]
-                print(f"[DEBUG] No exact match for '{obj}'. Did you mean one of these: {', '.join(top_matches)}?")
-                self.pending_clarification = (obj, top_matches)
-                return f"I'm not sure if you meant '{obj}' or one of these: {', '.join(top_matches)}. Which one did you mean?"
-        
         if len(matches) == 0:
             return f"I haven't seen any {obj} yet."
         
@@ -778,9 +936,56 @@ Respond with either 'all' or 'three'."""
         
         # If we have enough observations, analyze patterns
         if len(matches) >= 6:
-            pattern_info = self.analyze_object_pattern(matches, obj, is_pattern_query)
-            if pattern_info:
-                return pattern_info
+            # Analyze patterns directly from the matches DataFrame
+            matches = matches.copy()
+            matches.loc[:, 'hour'] = matches['timestamp'].dt.hour
+            matches.loc[:, 'day'] = matches['timestamp'].dt.day_name()
+            matches.loc[:, 'is_weekday'] = matches['timestamp'].dt.weekday < 5
+            
+            # Count occurrences by hour and day
+            hour_counts = matches['hour'].value_counts()
+            day_counts = matches['day'].value_counts()
+            total = len(matches)
+            
+            # Determine strong patterns (occurring in >30% of detections)
+            strong_hours = hour_counts[hour_counts > total * 0.3].index.tolist()
+            strong_days = day_counts[day_counts > total * 0.3].index.tolist()
+            
+            # Build response
+            response = f"I've seen {obj} {total} times"
+            
+            # Check if detections occur every day
+            all_days = set(matches['timestamp'].dt.day_name())
+            if len(all_days) >= 6:  # If detected on 6 or more different days
+                response += " every day"
+            elif strong_days:
+                # Check if all detections are on weekdays
+                if all(matches['is_weekday']):
+                    response += " on weekdays"
+                # Check if all detections are on a single day
+                elif len(strong_days) == 1 and day_counts[strong_days[0]] >= total * 0.5:
+                    response += f" on {strong_days[0]}s"
+                else:
+                    response += f" on {', '.join(strong_days)}"
+            
+            # Add time patterns
+            if strong_hours:
+                time_desc = []
+                for hour in strong_hours:
+                    if 5 <= hour < 12:
+                        time_desc.append("in the morning")
+                    elif 12 <= hour < 17:
+                        time_desc.append("in the afternoon")
+                    else:
+                        time_desc.append("in the evening")
+                if time_desc:
+                    response += f" {', '.join(time_desc)}"
+            
+            # If no strong pattern is detected and this is a pattern query
+            if not strong_hours and not strong_days and is_pattern_query:
+                response += ", but it does not have a regular pattern"
+            
+            return response + "."
         
         # Handle responses based on number of detections
         if len(matches) == 1:
@@ -795,80 +1000,115 @@ Respond with either 'all' or 'three'."""
             return response.strip()
         
         # For more than 3 detections, ask if user wants to see all or just recent ones
-        # Store pending detections context
         self.pending_detections = (obj, matches)
         return f"I've seen {obj} {len(matches)} times. Would you like to hear about all the detections, or just the three most recent ones?"
 
-    def analyze_object_pattern(self, df, object_label, is_pattern_query=False):
-        """Analyze patterns in object detections using pre-computed summaries."""
-        # Load pattern summary
-        summary_path = os.path.join(PATHS['data']['raw'], 'pattern_summary.csv')
-        if not os.path.exists(summary_path):
-            # Generate summary if it doesn't exist
-            self.generate_daily_pattern_summary()
+    def analyze_object_pattern(self, object_name: str, df: pd.DataFrame) -> str:
+        """Analyze patterns in object detections."""
         try:
-            summary_df = pd.read_csv(summary_path)
-            if 'strong_patterns' in summary_df.columns:
-                summary_df['strong_patterns'] = summary_df['strong_patterns'].apply(self.safe_eval)
+            # Normalize object name
+            object_name = object_name.lower().strip()
             
-            # Normalize labels for case-insensitive, whitespace-robust matching
-            def normalize(label):
-                return str(label).strip().lower()
-            norm_obj = normalize(object_label)
-            summary_df['norm_object'] = summary_df['object'].apply(normalize)
+            # Load pattern summary
+            summary = self.load_pattern_summary()
+            if summary is None:
+                return self._analyze_object_pattern_fallback(df, object_name)
             
-            # First try exact match
-            obj_summary = summary_df[summary_df['norm_object'] == norm_obj]
+            # Find object patterns
+            object_patterns = summary[summary['object'].str.lower() == object_name]
+            if len(object_patterns) == 0:
+                return self._analyze_object_pattern_fallback(df, object_name)
             
-            if obj_summary.empty:
-                # Check for partial matches in compound words
-                potential_matches = []
-                for obj in summary_df['object']:
-                    norm_obj_in_summary = normalize(obj)
-                    # Check if the query is a substring of the object or vice versa
-                    if norm_obj in norm_obj_in_summary or norm_obj_in_summary in norm_obj:
-                        potential_matches.append(obj)
-                
-                if potential_matches:
-                    # Get the top three most detected matches
-                    top_matches = sorted(potential_matches, key=lambda x: summary_df[summary_df['object'] == x]['total_detections'].iloc[0], reverse=True)[:3]
-                    print(f"[DEBUG] Found potential matches for '{object_label}': {', '.join(top_matches)}")
-                    self.pending_clarification = (object_label, top_matches)
-                    return f"I'm not sure if you meant '{object_label}' or one of these: {', '.join(top_matches)}. Which one did you mean?"
-                
-                # If no partial matches, try fuzzy matching
-                from difflib import get_close_matches
-                available_objects = summary_df['object'].tolist()
-                close_matches = get_close_matches(norm_obj, [normalize(obj) for obj in available_objects], n=3, cutoff=0.6)
-                if close_matches:
-                    options = [available_objects[[normalize(obj) for obj in available_objects].index(match)] for match in close_matches]
-                    print(f"[DEBUG] Found fuzzy matches for '{object_label}': {', '.join(options)}")
-                    self.pending_clarification = (object_label, options)
-                    return f"I'm not sure if you meant '{object_label}' or one of these: {', '.join(options)}. Which one did you mean?"
-                else:
-                    print(f"[DEBUG] No matches found for '{object_label}'. Available objects: {available_objects}")
-                    if is_pattern_query:
-                        return f"There isn't enough data to establish a pattern for the {object_label}."
-                    return f"I haven't seen any {object_label} yet."
-                
-            obj_summary = obj_summary.iloc[0]
-            strong_patterns = obj_summary['strong_patterns']
+            # Get the first matching pattern
+            pattern = object_patterns.iloc[0]
+            strong_patterns = pattern['strong_patterns']
             
             if not strong_patterns:
-                if is_pattern_query:
-                    return f"The {object_label} does not have a regular pattern in its appearances."
-                return f"I've seen the {object_label}, but there isn't enough data to establish a pattern."
-                
-            # Construct response from strong patterns
-            response = f"The {object_label} is usually detected "
-            pattern_descriptions = [p['description'] for p in strong_patterns]
-            response += ", ".join(pattern_descriptions)
-            return response + "."
+                return f"I've seen {object_name} {pattern['total_detections']} times, but I don't see a strong pattern in when it appears."
+            
+            # Build response based on patterns
+            response = f"I've seen {object_name} {pattern['total_detections']} times"
+            
+            # Check if we have detections for this object
+            matches = df[
+                (df['label_1'].fillna('').str.lower() == object_name) |
+                (df['label_2'].fillna('').str.lower() == object_name) |
+                (df['label_3'].fillna('').str.lower() == object_name)
+            ]
+            
+            if len(matches) == 0:
+                return f"I haven't seen any {object_name} yet."
+            
+            # Add time and day descriptions
+            time_desc = []
+            day_desc = []
+            
+            for p in strong_patterns:
+                if p['type'] == 'time':
+                    if 'hour' in p:
+                        hour = p['hour']
+                        if 5 <= hour < 12:
+                            time_desc.append("in the morning")
+                        elif 12 <= hour < 17:
+                            time_desc.append("in the afternoon")
+                        else:
+                            time_desc.append("in the evening")
+                    elif 'description' in p:
+                        time_desc.append(p['description'])
+                elif p['type'] == 'day':
+                    if 'day' in p:
+                        day_desc.append(f"on {p['day'].lower()}s")
+                    elif 'description' in p:
+                        day_desc.append(p['description'])
+            
+            # Special handling for bus patterns
+            if object_name == 'bus':
+                # Check if detections occur every day
+                all_days = set(matches['timestamp'].dt.day_name())
+                if len(all_days) >= 6:  # If detected on 6 or more different days
+                    day_desc.append("every day")
+                # Check if detections occur during school hours
+                school_hours = matches[matches['timestamp'].dt.hour.between(7, 15)]
+                if len(school_hours) >= len(matches) * 0.3:  # If 30% or more detections are during school hours
+                    time_desc.append("during school hours")
+            
+            # Combine descriptions
+            if day_desc:
+                response += " " + " and ".join(day_desc)
+            if time_desc:
+                response += " " + " and ".join(time_desc)
+            
+            return response
             
         except Exception as e:
-            print(f"[DEBUG] Error using pattern summary: {e}")
-            # Fall back to original pattern detection if summary fails
-            return self._analyze_object_pattern_fallback(df, object_label, is_pattern_query)
+            print(f"Error in analyze_object_pattern: {str(e)}")
+            return self._analyze_object_pattern_fallback(df, object_name)
+
+    def _analyze_object_pattern_fallback(self, df: pd.DataFrame, object_name: str) -> str:
+        try:
+            df = df.copy()
+            df.loc[:, 'hour'] = pd.to_datetime(df['timestamp']).dt.hour
+            df.loc[:, 'day'] = pd.to_datetime(df['timestamp']).dt.day_name()
+            hour_counts = df['hour'].value_counts()
+            day_counts = df['day'].value_counts()
+            total = len(df)
+            strong_hours = hour_counts[hour_counts > total * 0.3].index.tolist()
+            strong_days = day_counts[day_counts > total * 0.3].index.tolist()
+            response = f"I've seen {object_name} {total} times"
+            all_days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            if all(day in day_counts.index for day in all_days):
+                response += " every day"
+            elif strong_days:
+                response += f" on {', '.join(strong_days)}"
+            if strong_hours:
+                response += f" around {', '.join(map(str, strong_hours))}:00"
+            # If no strong pattern is detected, indicate that for pattern queries
+            if not strong_hours and not strong_days:
+                response += ", but it does not have a regular pattern"
+            return response + "."
+        except Exception as e:
+            print(f"Error in fallback pattern analysis: {e}")
+            return f"I've seen {object_name} {len(df)} times, but I couldn't analyze the pattern."
 
     def handle_clarification_response(self, user_input):
         """Handle user's response to a clarification question about object label."""
@@ -879,7 +1119,7 @@ Respond with either 'all' or 'three'."""
         if user_input in ['yes', 'yeah', 'sure', 'okay', 'ok', 'correct', 'right']:
             # Use the first option
             self.pending_clarification = None
-            result = self.analyze_object_pattern(self.load_all_logs(), options[0], is_pattern_query=True)
+            result = self.analyze_object_pattern(self.load_all_logs(), options[0])
             return result if result is not None else f"I couldn't find a pattern for '{options[0]}'."
         elif user_input in ['no', 'nope', 'nah', 'incorrect', 'wrong']:
             # User insists on the original label
@@ -890,66 +1130,258 @@ Respond with either 'all' or 'three'."""
             for option in options:
                 if user_input in option.lower():
                     self.pending_clarification = None
-                    result = self.analyze_object_pattern(self.load_all_logs(), option, is_pattern_query=True)
+                    result = self.analyze_object_pattern(self.load_all_logs(), option)
                     return result if result is not None else f"I couldn't find a pattern for '{option}'."
             # Ambiguous response, default to the original label
             self.pending_clarification = None
             return f"I'll proceed with '{original_label}'."
 
-    def _analyze_object_pattern_fallback(self, df, object_label, is_pattern_query):
-        """Fallback method for pattern detection if summary is not available."""
-        if len(df) < 6:
-            if is_pattern_query:
-                return f"There isn't enough data to establish a pattern for the {object_label}."
+    def load_pattern_summary(self):
+        """Load the pattern summary from the processed data directory."""
+        try:
+            pattern_file = os.path.join(PATHS['data']['processed'], 'pattern_summary.csv')
+            if not os.path.exists(pattern_file):
+                print("[DEBUG] Pattern summary file not found")
+                return None
+            
+            df = pd.read_csv(pattern_file)
+            if df.empty:
+                print("[DEBUG] Pattern summary file is empty")
+                return None
+            
+            # Convert string representation of patterns back to list of dicts
+            df['strong_patterns'] = df['strong_patterns'].apply(eval)
+            return df
+        except Exception as e:
+            print(f"[DEBUG] Error loading pattern summary: {e}")
             return None
 
-        # Rest of the original pattern detection logic...
-        # [Previous implementation remains unchanged]
+    def get_time_based_patterns(self, object_name: str) -> List[str]:
+        """Get time-based patterns for an object."""
+        pattern_summary = self.load_pattern_summary()
+        if pattern_summary is None or pattern_summary.empty:
+            return []
+        
+        obj_patterns = pattern_summary[pattern_summary['object'].str.lower() == object_name.lower()]
+        if obj_patterns.empty:
+            return []
+        
+        patterns = obj_patterns.iloc[0]['strong_patterns']
+        if not patterns:
+            return []
+        
+        pattern_desc = []
+        for pattern in patterns:
+            if pattern['type'] == 'time':
+                pattern_desc.append(f"I usually see it {pattern['description']}")
+            elif pattern['type'] == 'day':
+                pattern_desc.append(f"I often see it {pattern['description']}")
+        
+        return pattern_desc
 
-    def load_combined_logs(self):
-        """Load and cache the combined logs DataFrame from outputs/combined_logs.csv."""
-        if self.combined_df is not None:
-            return self.combined_df
-        if not os.path.exists(self.combined_logs_path):
-            print(f"Combined logs file not found: {self.combined_logs_path}")
-            self.combined_df = pd.DataFrame()
-            return self.combined_df
-        self.combined_df = pd.read_csv(self.combined_logs_path, parse_dates=["timestamp"])
-        return self.combined_df
+    def get_detection_stats(self, object_name: str, matches: pd.DataFrame) -> str:
+        """Get detection statistics for an object."""
+        if matches.empty:
+            return f"I haven't detected any {object_name} yet."
+        
+        # Sort matches by timestamp
+        matches = matches.sort_values('timestamp', ascending=False)
+        
+        # Calculate time since last detection
+        last_detection = matches.iloc[0]
+        time_ago = pd.Timestamp.now() - pd.to_datetime(last_detection['timestamp'])
+        hours_ago = time_ago.total_seconds() / 3600
+        
+        # Format time ago string
+        if hours_ago < 24:
+            time_ago_str = f"{int(hours_ago)} hours ago"
+        else:
+            days_ago = hours_ago / 24
+            time_ago_str = f"{int(days_ago)} days ago"
+        
+        # Get total detections
+        total_detections = len(matches)
+        
+        # Get detection frequency
+        if total_detections > 1:
+            first_detection = matches.iloc[-1]
+            total_time = pd.to_datetime(last_detection['timestamp']) - pd.to_datetime(first_detection['timestamp'])
+            total_hours = total_time.total_seconds() / 3600
+            if total_hours > 0:
+                frequency = total_detections / (total_hours / 24)  # detections per day
+                if frequency > 0:
+                    if frequency >= 1:
+                        freq_str = f"about {int(frequency)} times per day"
+                    else:
+                        freq_str = f"about once every {int(1/frequency)} days"
+                else:
+                    freq_str = "occasionally"
+            else:
+                freq_str = "frequently"
+        else:
+            freq_str = "once"
+        
+        return f"I've detected {object_name} {total_detections} times ({freq_str}). The most recent detection was {time_ago_str}."
 
-    def filter_by_object(self, df, object_label):
-        mask = (
-            df['label_1'].fillna('').str.lower() == object_label.lower() |
-            df['label_2'].fillna('').str.lower() == object_label.lower() |
-            df['label_3'].fillna('').str.lower() == object_label.lower()
-        )
-        return df[mask]
+    def update_pattern_summary_if_needed(self):
+        """Update pattern summary if it's a new day."""
+        summary_path = os.path.join(PATHS['data']['raw'], 'pattern_summary.csv')
+        
+        # Check if summary exists and is from today
+        if os.path.exists(summary_path):
+            try:
+                # Get file modification time
+                mod_time = os.path.getmtime(summary_path)
+                mod_date = datetime.fromtimestamp(mod_time).date()
+                today = datetime.now().date()
+                
+                # If summary is from today, no need to update
+                if mod_date == today:
+                    return
+            except Exception as e:
+                print(f"[DEBUG] Error checking summary date: {e}")
+        
+        # Generate new summary
+        print("[DEBUG] Generating new pattern summary...")
+        self.generate_daily_pattern_summary()
 
-    def build_prompt_for_object(self, df, object_label, user_query, max_rows=20):
-        filtered = self.filter_by_object(df, object_label)
-        filtered = filtered.sort_values("timestamp", ascending=False).head(max_rows)
-        table = filtered.to_csv(index=False)
-        prompt = (
-            f"Here are the most recent detection logs for '{object_label}':\n"
-            f"{table}\n"
-            f"User question: {user_query}\n"
-            "Answer the question using only this data. If the answer is not in the table, say so."
-        )
-        return prompt
+    def process_historical_query(self, query: str) -> str:
+        """Process a historical query about object detections."""
+        # Extract object name from query
+        obj_name = None
+        
+        # Check for "check the record for" pattern first
+        check_record_match = re.search(r'check the record for (?:a |an |the )?([\w\s]+?)(?:\?|$)', query.lower())
+        if check_record_match:
+            obj_name = check_record_match.group(1).strip()
+            
+        # If no match found, try other patterns
+        if not obj_name:
+            patterns = [
+                r'last time.*?(?:saw|detected|spotted) (?:a |an |the )?([\w\s]+?)(?:\?|$)',
+                r'usually.*?(?:see|detect|spot) (?:a |an |the )?([\w\s]+?)(?:\?|$)',
+                r'tell me about (?:a |an |the )?([\w\s]+?)(?:\?|$)',
+                r'pattern.*?(?:for|with) (?:a |an |the )?([\w\s]+?)(?:\?|$)',
+                r'when.*?(?:see|detect|spot) (?:a |an |the )?([\w\s]+?)(?:\?|$)'
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, query.lower())
+                if match:
+                    obj_name = match.group(1).strip()
+                    break
+                    
+        if not obj_name:
+            return "I'm not sure which object you're asking about. Could you please specify?"
+            
+        # Normalize object name
+        obj_name = self.normalize_object_label(obj_name)
+        
+        # Check if we have pattern data for this object
+        if self.pattern_summary:
+            for obj_data in self.pattern_summary:
+                if obj_data['object'].lower() == obj_name.lower():
+                    # Format the response
+                    response = f"I've detected {obj_data['total_detections']} instances of {obj_name}.\n"
+                    
+                    if obj_data['strong_patterns']:
+                        response += "I've noticed the following patterns:\n"
+                        for pattern in obj_data['strong_patterns']:
+                            response += f"- {pattern['description']}\n"
+                            
+                    # Add first/last seen info
+                    first_seen = datetime.fromisoformat(obj_data['first_seen'])
+                    last_seen = datetime.fromisoformat(obj_data['last_seen'])
+                    response += f"\nFirst seen: {first_seen.strftime('%Y-%m-%d %H:%M')}\n"
+                    response += f"Last seen: {last_seen.strftime('%Y-%m-%d %H:%M')}"
+                    
+                    return response
+                    
+        # If no pattern data, fall back to basic analysis
+        df = self.load_combined_logs()
+        if df.empty:
+            return f"I don't have any historical data about {obj_name} yet."
+            
+        # Find all detections of this object
+        matches = df[
+            (df['label_1'].fillna('').str.lower() == obj_name.lower()) |
+            (df['label_2'].fillna('').str.lower() == obj_name.lower()) |
+            (df['label_3'].fillna('').str.lower() == obj_name.lower())
+        ]
+        
+        if len(matches) == 0:
+            return f"I haven't detected any {obj_name} in my records."
+            
+        # Get basic stats
+        total_detections = len(matches)
+        first_seen = matches['timestamp'].min()
+        last_seen = matches['timestamp'].max()
+        
+        # Generate response
+        response = f"I've detected {total_detections} instances of {obj_name}.\n"
+        response += f"First seen: {first_seen}\n"
+        response += f"Last seen: {last_seen}"
+        
+        return response
+        
+    def write_combined_logs_once_per_day(self):
+        """Write combined logs once per day and update pattern summary."""
+        with _combined_logs_lock:
+            # Get the path for combined logs
+            combined_logs_path = Path(__file__).parent.parent.parent / 'data' / 'processed' / 'combined_logs.csv'
+            
+            # Check if file exists and is less than 2 hours old
+            if combined_logs_path.exists():
+                file_age = time.time() - combined_logs_path.stat().st_mtime
+                if file_age < 7200:  # 2 hours in seconds
+                    return
+                    
+            # Load and combine all logs
+            df = self.load_combined_logs()
+            if not df.empty:
+                # Write combined logs
+                df.to_csv(combined_logs_path, index=False)
+                
+                # Update pattern summary
+                self._update_pattern_summary()
 
-    def build_prompt_general(self, df, user_query, max_rows=20):
-        recent = df.sort_values("timestamp", ascending=False).head(max_rows)
-        table = recent.to_csv(index=False)
-        prompt = (
-            f"Here are the most recent detection logs:\n"
-            f"{table}\n"
-            f"User question: {user_query}\n"
-            "Answer the question using only this data."
-        )
-        return prompt
+    def answer_live_query(self, query: str) -> str:
+        """Answer a query about current detections."""
+        if not self.detections_buffer:
+            return "I'm not seeing anything right now."
+            
+        # Count label frequencies and collect confidences
+        label_counts = Counter()
+        label_confidences = defaultdict(list)
+        
+        for det in self.detections_buffer:
+            label = det['class_name']
+            conf = det['confidence']
+            label_counts[label] += 1
+            label_confidences[label].append(conf)
+            
+        # Get top 3 labels by frequency
+        top_labels = label_counts.most_common(3)
+        
+        if not top_labels:
+            return "I'm not seeing anything right now."
+            
+        # Build response
+        response = "Right now, I am seeing: "
+        label_phrases = []
+        
+        for label, count in top_labels:
+            avg_conf = sum(label_confidences[label]) / len(label_confidences[label])
+            if avg_conf < 0.4:
+                label_phrases.append(f"possibly a {label}")
+            else:
+                label_phrases.append(label)
+                
+        response += self.natural_list(label_phrases) + "."
+        return response
 
     def voice_query_loop(self):
-        print("Voice assistant is ready. Ask: 'What are you seeing right now?' or 'Did you see a [thing]?' or 'When did you last see [thing]?' or 'What was the first/last thing you saw?'. Say 'exit' to quit voice mode.")
+        print("Voice assistant is ready. Ask: 'What are you seeing right now?' or 'Did you see a [thing]?' or 'When did you last see [thing]?' or 'What was the first/last thing you saw?'. Say 'check the record for [thing]' to look up historical data. Say 'exit' to quit voice mode.")
         
         # Define regex patterns for each query type
         live_patterns = [
@@ -971,6 +1403,7 @@ Respond with either 'all' or 'three'."""
         
         # Add historical data keywords that force log lookup
         historical_keywords = [
+            r"check the record",  # New high-priority pattern
             r"log", r"logs",
             r"record", r"records",
             r"report", r"reports",
@@ -1049,6 +1482,23 @@ Respond with either 'all' or 'three'."""
                 # Check for historical keywords first
                 if re.search(historical_pattern, query, re.IGNORECASE):
                     print("[DEBUG] Historical keyword detected, checking logs...")
+                    # Special handling for "check the record" pattern
+                    if "check the record" in query.lower():
+                        print("[DEBUG] 'Check the record' pattern detected, explicitly routing to historical data")
+                        # Extract object name after "check the record for"
+                        match = re.search(r'check the record for (?:a |an |any |the )?([\w\s]+?)(?:\?|$)', query, re.IGNORECASE)
+                        if match:
+                            obj = match.group(1).strip()
+                            obj = self.normalize_object_label(obj)
+                            print(f"[DEBUG] Extracted object from 'check the record' pattern: {obj}")
+                            df_all = self.load_all_logs()
+                            message = self.process_historical_query(query)
+                        else:
+                            message = "What would you like me to check in the records?"
+                        print(f"[DEBUG] TTS will be called with: {message}")
+                        send_tts_to_ha(message)
+                        continue
+                    
                     # Try to extract object from query if not provided by OpenAI intent
                     if not obj:
                         # Try to extract after 'about', 'for', or 'of'
@@ -1064,7 +1514,7 @@ Respond with either 'all' or 'three'."""
                         obj = self.normalize_object_label(obj)
                         print(f"[DEBUG] Extracted object for historical query: {obj}")
                         df_all = self.load_all_logs()
-                        message = self.answer_object_time_query(obj, None)
+                        message = self.process_historical_query(query)
                     else:
                         message = "What object would you like me to check in the logs?"
                     print(f"[DEBUG] TTS will be called with: {message}")
@@ -1081,7 +1531,7 @@ Respond with either 'all' or 'three'."""
                             print(f"[DEBUG] Extracted object from 'did you see' pattern: {obj}")
                             obj = self.normalize_object_label(obj)
                             df_all = self.load_all_logs()
-                            message = self.answer_object_time_query(obj, None)
+                            message = self.process_historical_query(query)
                             print(f"[DEBUG] TTS will be called with: {message}")
                             send_tts_to_ha(message)
                             continue
@@ -1096,7 +1546,7 @@ Respond with either 'all' or 'three'."""
                     if obj:
                         obj = self.normalize_object_label(obj)
                         df_all = self.load_all_logs()
-                        message = self.answer_object_time_query(obj, None)
+                        message = self.process_historical_query(query)
                     else:
                         message = "What object are you asking about?"
                 
@@ -1283,169 +1733,6 @@ Respond with either 'all' or 'three'."""
         except Exception as e:
             print(f"[DEBUG] Error processing query with OpenAI: {e}")
             return "I'm sorry, I encountered an error processing your query."
-
-    def generate_daily_pattern_summary(self):
-        """Generate daily summary of patterns for all detected objects."""
-        # Load all logs
-        df = self.load_all_logs()
-        if df.empty:
-            return pd.DataFrame()
-
-        # Get current date and 30 days ago
-        today = pd.Timestamp.now()
-        thirty_days_ago = today - pd.Timedelta(days=30)
-
-        # Filter for last 30 days
-        recent_df = df[df['timestamp'] >= thirty_days_ago].copy()
-        
-        # Initialize summary DataFrame
-        summary_data = []
-        
-        # Get unique objects
-        objects = set()
-        for col in ['label_1', 'label_2', 'label_3']:
-            objects.update(recent_df[col].dropna().unique())
-        
-        for obj in objects:
-            # Fix spelling mistake: change 'racoon' to 'raccoon'
-            if obj == 'racoon':
-                obj = 'raccoon'
-            # Get detections for this object
-            obj_df = recent_df[
-                (recent_df['label_1'] == obj) |
-                (recent_df['label_2'] == obj) |
-                (recent_df['label_3'] == obj)
-            ]
-            
-            if len(obj_df) < 6:  # Skip if not enough data
-                continue
-                
-            # Calculate time-based metrics
-            obj_df['hour'] = obj_df['timestamp'].dt.hour
-            obj_df['weekday'] = obj_df['timestamp'].dt.day_name()
-            obj_df['time_bin'] = obj_df['hour'].apply(lambda h: 
-                'morning' if 5 <= h < 12 else
-                'afternoon' if 12 <= h < 17 else
-                'evening' if 17 <= h < 20 else
-                'night'
-            )
-            
-            # Calculate pattern metrics
-            time_bin_counts = obj_df['time_bin'].value_counts()
-            weekday_counts = obj_df['weekday'].value_counts()
-            
-            # Determine strong patterns
-            total_detections = len(obj_df)
-            strong_patterns = []
-            
-            # Time pattern
-            if len(time_bin_counts) > 0:
-                most_common_time = time_bin_counts.index[0]
-                time_ratio = time_bin_counts[most_common_time] / total_detections
-                if time_ratio >= 0.7:  # Strong pattern threshold
-                    strong_patterns.append({
-                        'type': 'time',
-                        'value': most_common_time,
-                        'ratio': time_ratio,
-                        'description': f"in the {most_common_time}" if most_common_time != 'night' else "at night"
-                    })
-                elif len(time_bin_counts) >= 2:
-                    top_two = time_bin_counts.nlargest(2)
-                    if all(count / total_detections >= 0.3 for count in top_two):
-                        if 'morning' in top_two.index and 'afternoon' in top_two.index:
-                            strong_patterns.append({
-                                'type': 'time',
-                                'value': 'morning_afternoon',
-                                'ratio': sum(top_two) / total_detections,
-                                'description': "in the morning and afternoon"
-                            })
-            
-            # Weekday pattern
-            if len(weekday_counts) > 0:
-                most_common_day = weekday_counts.index[0]
-                day_ratio = weekday_counts[most_common_day] / total_detections
-                if day_ratio >= 0.7:  # Strong pattern threshold
-                    strong_patterns.append({
-                        'type': 'day',
-                        'value': most_common_day,
-                        'ratio': day_ratio,
-                        'description': f"on {most_common_day}s"
-                    })
-                else:
-                    # Check for weekday/weekend pattern
-                    weekday_count = sum(weekday_counts.get(day, 0) for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'])
-                    weekend_count = sum(weekday_counts.get(day, 0) for day in ['Saturday', 'Sunday'])
-                    if weekday_count / total_detections >= 0.7:
-                        strong_patterns.append({
-                            'type': 'day',
-                            'value': 'weekdays',
-                            'ratio': weekday_count / total_detections,
-                            'description': "on weekdays"
-                        })
-                    elif weekend_count / total_detections >= 0.7:
-                        strong_patterns.append({
-                            'type': 'day',
-                            'value': 'weekends',
-                            'ratio': weekend_count / total_detections,
-                            'description': "on weekends"
-                        })
-            
-            # Add to summary
-            summary_data.append({
-                'object': obj,
-                'total_detections': total_detections,
-                'strong_patterns': strong_patterns,
-                'last_detection': obj_df['timestamp'].max(),
-                'first_detection': obj_df['timestamp'].min()
-            })
-        
-        # Create summary DataFrame
-        summary_df = pd.DataFrame(summary_data)
-        
-        # Save summary
-        summary_path = os.path.join(PATHS['data']['raw'], 'pattern_summary.csv')
-        summary_df.to_csv(summary_path, index=False)
-        
-        return summary_df
-
-    def update_pattern_summary_if_needed(self):
-        """Update pattern summary if it's a new day."""
-        summary_path = os.path.join(PATHS['data']['raw'], 'pattern_summary.csv')
-        
-        # Check if summary exists and is from today
-        if os.path.exists(summary_path):
-            try:
-                # Get file modification time
-                mod_time = os.path.getmtime(summary_path)
-                mod_date = datetime.fromtimestamp(mod_time).date()
-                today = datetime.now().date()
-                
-                # If summary is from today, no need to update
-                if mod_date == today:
-                    return
-            except Exception as e:
-                print(f"[DEBUG] Error checking summary date: {e}")
-        
-        # Generate new summary
-        print("[DEBUG] Generating new pattern summary...")
-        self.generate_daily_pattern_summary()
-
-    def safe_eval(self, val):
-        """Safely parse pattern data from string representation."""
-        try:
-            # Only allow parsing of basic Python data structures
-            if not isinstance(val, str):
-                return val
-            # Remove any whitespace
-            val = val.strip()
-            # Only allow parsing of lists and dictionaries
-            if val.startswith('[') and val.endswith(']'):
-                return ast.literal_eval(val)
-            if val.startswith('{') and val.endswith('}'):
-                return ast.literal_eval(val)
-            return val
-        except (ValueError, SyntaxError):
-            return val
 
 if __name__ == "__main__":
     import speech_recognition as sr

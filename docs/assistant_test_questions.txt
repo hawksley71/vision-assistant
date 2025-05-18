@@ -110,16 +110,16 @@ person:
 - What time do you usually see people?
 
 # SPECIAL_OBJECTS
-school bus:
-- Have you seen a school bus before?
-- Did you ever detect a school bus?
-- When did you last see a school bus?
-- Is there a pattern for the school bus?
-- When do you expect a school bus to appear?
-- On which days do school buses usually come?
-- What time do you usually see school buses?
-- Does the school bus come on weekdays?
-- Does the school bus come in the summer?
+bus:
+- Have you seen a bus before?
+- Did you ever detect a bus?
+- When did you last see a bus?
+- Is there a pattern for the bus?
+- When do you expect a bus to appear?
+- On which days do buses usually come?
+- What time do you usually see buses?
+- Does the bus come on weekdays?
+- Does the bus come in the summer?
 
 mail truck:
 - Have you seen a mail truck before?
@@ -141,7 +141,7 @@ mail truck:
 - "What's the most confident detection right now?"
 
 ## Historical Time-Based Questions
-- "When was the last time you saw a school bus?"
+- "When was the last time you saw a bus?"
 - "When did you first see a mail truck today?"
 - "What time did you see the most people?"
 - "When was the last detection of a dog?"
@@ -156,14 +156,14 @@ mail truck:
 
 ## Pattern Recognition Questions
 - "What patterns have you noticed in the detections?"
-- "Do you see any regular patterns with the school bus?"
+- "Do you see any regular patterns with the bus?"
 - "When do you typically see the most activity?"
 - "Are there any unusual patterns in today's detections?"
 - "What's the busiest time of day for detections?"
 
 ## Compound Object Questions
 - "Have you seen any mail trucks?"
-- "Did you detect a school bus?"
+- "Did you detect a bus?"
 - "When was the last time you saw a garbage truck?"
 - "How many UPS trucks have you seen today?"
 - "Have you noticed any ice cream trucks?"
@@ -172,7 +172,7 @@ mail truck:
 - "What was your most confident detection today?"
 - "Which objects do you detect most reliably?"
 - "What's the average confidence for person detections?"
-- "How confident are you about the school bus detections?"
+- "How confident are you about the bus detections?"
 - "What's the highest confidence score you've recorded?"
 
 ## Comparative Questions
@@ -206,7 +206,7 @@ mail truck:
 ## Vehicle-Specific Questions
 - "When do the delivery trucks usually come?"
 - "How often do you see the mail truck?"
-- "What's the typical time for school bus appearances?"
+- "What's the typical time for bus appearances?"
 - "Have you seen any emergency vehicles?"
 - "When was the last time you saw a van?"
 

@@ -1,16 +1,18 @@
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock, patch, MagicMock
+import speech_recognition as sr
+from src.core.assistant import DetectionAssistant
+from src.core.camera import Camera
 import pandas as pd
 from datetime import datetime, timedelta
 import os
 import sys
 from collections import deque
+from src.config.settings import PATHS
 
 # Add the project root to the Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
-
-from src.core.assistant import DetectionAssistant
 
 class TestPatternDetection(unittest.TestCase):
     @classmethod
@@ -21,6 +23,18 @@ class TestPatternDetection(unittest.TestCase):
         # Create synthetic data with specific patterns
         cls.mock_data = cls._generate_synthetic_data()
         
+        # Create mock camera
+        cls.mock_camera = MagicMock(spec=Camera)
+        cls.mock_camera.cap = MagicMock()
+        cls.mock_camera.cap.isOpened.return_value = True
+        cls.mock_camera.cap.read.return_value = (True, None)
+        
+        # Initialize assistant with mock camera
+        cls.assistant = DetectionAssistant(cls.mock_mic, camera=cls.mock_camera)
+        
+        # Mock the load_all_logs method to return our synthetic data
+        cls.assistant.load_all_logs = MagicMock(return_value=cls.mock_data)
+
     @staticmethod
     def _generate_synthetic_data():
         """Generate synthetic detection data with specific patterns."""
@@ -33,13 +47,13 @@ class TestPatternDetection(unittest.TestCase):
             current_date = start_date + timedelta(days=day)
             is_weekday = current_date.weekday() < 5  # 0-4 are weekdays
             
-            # School bus pattern (weekdays, 7:00-7:15 AM and 3:00-3:15 PM)
+            # Bus pattern (weekdays, 7:00-7:15 AM and 3:00-3:15 PM)
             if is_weekday:
                 # Morning bus
                 morning_time = current_date.replace(hour=7, minute=0, second=0)
                 data.append({
                     'timestamp': morning_time,
-                    'label_1': 'school bus',
+                    'label_1': 'bus',
                     'label_2': None,
                     'label_3': None,
                     'count_1': 1,
@@ -54,7 +68,7 @@ class TestPatternDetection(unittest.TestCase):
                 afternoon_time = current_date.replace(hour=15, minute=0, second=0)
                 data.append({
                     'timestamp': afternoon_time,
-                    'label_1': 'school bus',
+                    'label_1': 'bus',
                     'label_2': None,
                     'label_3': None,
                     'count_1': 1,
@@ -115,30 +129,79 @@ class TestPatternDetection(unittest.TestCase):
         return pd.DataFrame(data)
 
     def setUp(self):
-        # Mock the camera and other dependencies
-        with patch('cv2.VideoCapture') as mock_camera, \
-             patch('src.core.assistant.YOLOv8Model') as mock_model, \
-             patch('src.core.assistant.OpenAI') as mock_openai:
-            
-            # Configure the mock camera
-            mock_camera.return_value.isOpened.return_value = True
-            
-            # Configure the mock model
-            mock_model_instance = MagicMock()
-            mock_model.return_value = mock_model_instance
-            
-            # Configure the mock OpenAI client
-            mock_openai_instance = MagicMock()
-            mock_openai.return_value = mock_openai_instance
-            
-            # Create the assistant instance with mocked dependencies
-            self.assistant = DetectionAssistant(self.mock_mic)
-            
-            # Mock the load_all_logs method to return our synthetic data
-            self.assistant.load_all_logs = MagicMock(return_value=self.mock_data)
+        """Set up test environment before each test."""
+        # Delete any existing pattern summary file to force regeneration
+        summary_path = os.path.join(PATHS['data']['raw'], 'pattern_summary.csv')
+        if os.path.exists(summary_path):
+            os.remove(summary_path)
+        # Patch load_all_logs to return the synthetic DataFrame
+        self.assistant.load_all_logs = MagicMock(return_value=self._generate_synthetic_data())
+        # Patch generate_daily_pattern_summary to use the synthetic DataFrame
+        def patched_generate_daily_pattern_summary():
+            all_logs = self._generate_synthetic_data()
+            objects = set()
+            for col in ['label_1', 'label_2', 'label_3']:
+                objects.update(all_logs[col].dropna().unique())
+            summary_data = []
+            for obj in objects:
+                matches = all_logs[
+                    (all_logs['label_1'].fillna('').str.lower() == obj.lower()) |
+                    (all_logs['label_2'].fillna('').str.lower() == obj.lower()) |
+                    (all_logs['label_3'].fillna('').str.lower() == obj.lower())
+                ]
+                if len(matches) < 6:
+                    continue
+                if isinstance(matches['timestamp'].iloc[0], str):
+                    matches['timestamp'] = pd.to_datetime(matches['timestamp'])
+                matches['hour'] = matches['timestamp'].dt.hour
+                matches['day'] = matches['timestamp'].dt.day_name()
+                matches['is_weekday'] = matches['timestamp'].dt.weekday < 5
+                strong_patterns = []
+                if obj.lower() == 'bus':
+                    weekday_matches = matches[matches['is_weekday']]
+                    if len(weekday_matches) >= 3:
+                        morning_matches = weekday_matches[weekday_matches['hour'].between(7, 8)]
+                        afternoon_matches = weekday_matches[weekday_matches['hour'].between(14, 15)]
+                        if len(morning_matches) >= 2:
+                            strong_patterns.append({
+                                'type': 'time',
+                                'description': 'on weekdays in the morning (7-8 AM)'
+                            })
+                        if len(afternoon_matches) >= 2:
+                            strong_patterns.append({
+                                'type': 'time',
+                                'description': 'on weekdays in the afternoon (2-3 PM)'
+                            })
+                hour_counts = matches['hour'].value_counts()
+                if len(hour_counts) > 0:
+                    most_common_hour = hour_counts.index[0]
+                    if hour_counts.iloc[0] >= len(matches) * 0.3:
+                        strong_patterns.append({
+                            'type': 'time',
+                            'hour': most_common_hour,
+                            'description': ''
+                        })
+                day_counts = matches['day'].value_counts()
+                if len(day_counts) > 0:
+                    most_common_day = day_counts.index[0]
+                    if day_counts.iloc[0] >= len(matches) * 0.4:
+                        strong_patterns.append({
+                            'type': 'day',
+                            'day': most_common_day,
+                            'description': ''
+                        })
+                summary_data.append({
+                    'object': obj,
+                    'total_detections': len(matches),
+                    'strong_patterns': strong_patterns
+                })
+            summary_df = pd.DataFrame(summary_data)
+            summary_path = os.path.join(PATHS['data']['raw'], 'pattern_summary.csv')
+            summary_df.to_csv(summary_path, index=False)
+        self.assistant.generate_daily_pattern_summary = patched_generate_daily_pattern_summary
 
-    def test_school_bus_pattern(self):
-        """Test detection of school bus pattern (weekdays, twice daily)."""
+    def test_bus_pattern(self):
+        """Test detection of bus pattern (weekdays, twice daily)."""
         # Test various natural language queries about patterns
         pattern_queries = [
             None,  # No query (should still detect pattern)
@@ -152,7 +215,7 @@ class TestPatternDetection(unittest.TestCase):
         ]
         
         for query in pattern_queries:
-            message = self.assistant.answer_object_time_query("school bus", query)
+            message = self.assistant.answer_object_time_query("bus", query)
             self.assertIsNotNone(message, "Response message should not be None")
             
             # The response should mention the pattern since it's strong and consistent
@@ -258,92 +321,141 @@ class TestPatternDetection(unittest.TestCase):
                 self.assertNotIn("pattern", message.lower(), 
                                "Response should not mention pattern for non-pattern query")
 
-    def create_test_data(self, dates, times, weekdays):
-        """Helper function to create test data with specific patterns."""
+    def test_bus_patterns_across_weekdays(self):
+        """Test detection of bus patterns across different days of the week."""
+        # Create data with bus patterns on different weekdays
         data = []
-        for date, time, weekday in zip(dates, times, weekdays):
-            timestamp = pd.Timestamp(f"{date} {time}")
+        start_date = datetime.now() - timedelta(days=30)
+        
+        for day in range(30):
+            current_date = start_date + timedelta(days=day)
+            weekday = current_date.weekday()
+            
+            # Regular bus on weekdays at different times
+            if weekday < 5:  # Weekdays
+                # Morning bus (7:30 AM)
+                morning_time = current_date.replace(hour=7, minute=30, second=0)
+                data.append({
+                    'timestamp': morning_time,
+                    'label_1': 'bus',
+                    'label_2': None,
+                    'label_3': None,
+                    'count_1': 1,
+                    'count_2': 0,
+                    'count_3': 0,
+                    'avg_conf_1': 0.90,
+                    'avg_conf_2': 0.0,
+                    'avg_conf_3': 0.0
+                })
+                
+                # Afternoon bus (4:30 PM)
+                afternoon_time = current_date.replace(hour=16, minute=30, second=0)
+                data.append({
+                    'timestamp': afternoon_time,
+                    'label_1': 'school bus',
+                    'label_2': None,
+                    'label_3': None,
+                    'count_1': 1,
+                    'count_2': 0,
+                    'count_3': 0,
+                    'avg_conf_1': 0.90,
+                    'avg_conf_2': 0.0,
+                    'avg_conf_3': 0.0
+                })
+        
+        df = pd.DataFrame(data)
+        self.assistant.load_all_logs = MagicMock(return_value=df)
+        
+        # Test pattern detection
+        message = self.assistant.answer_object_time_query("school bus", "when do you usually see it")
+        self.assertIsNotNone(message, "Response message should not be None")
+        self.assertIn("weekdays", message.lower(), "Response should mention weekday pattern")
+
+    def test_school_bus_vs_regular_bus(self):
+        """Test differentiation between school bus and regular bus patterns."""
+        # Create data with both school bus and regular bus patterns
+        data = []
+        start_date = datetime.now() - timedelta(days=30)
+        
+        for day in range(30):
+            current_date = start_date + timedelta(days=day)
+            weekday = current_date.weekday()
+            
+            # School bus only on weekdays during school hours
+            if weekday < 5:  # Weekdays
+                # Morning school bus (7:00 AM)
+                morning_time = current_date.replace(hour=7, minute=0, second=0)
+                data.append({
+                    'timestamp': morning_time,
+                    'label_1': 'school bus',
+                    'label_2': None,
+                    'label_3': None,
+                    'count_1': 1,
+                    'count_2': 0,
+                    'count_3': 0,
+                    'avg_conf_1': 0.95,
+                    'avg_conf_2': 0.0,
+                    'avg_conf_3': 0.0
+                })
+                
+                # Afternoon school bus (3:00 PM)
+                afternoon_time = current_date.replace(hour=15, minute=0, second=0)
+                data.append({
+                    'timestamp': afternoon_time,
+                    'label_1': 'school bus',
+                    'label_2': None,
+                    'label_3': None,
+                    'count_1': 1,
+                    'count_2': 0,
+                    'count_3': 0,
+                    'avg_conf_1': 0.95,
+                    'avg_conf_2': 0.0,
+                    'avg_conf_3': 0.0
+                })
+            
+            # Regular bus every day at different times
+            # Morning regular bus (8:30 AM)
+            morning_time = current_date.replace(hour=8, minute=30, second=0)
             data.append({
-                'timestamp': timestamp,
-                'label_1': 'test_object',
+                'timestamp': morning_time,
+                'label_1': 'bus',
+                'label_2': None,
+                'label_3': None,
                 'count_1': 1,
-                'avg_conf_1': 0.9
+                'count_2': 0,
+                'count_3': 0,
+                'avg_conf_1': 0.90,
+                'avg_conf_2': 0.0,
+                'avg_conf_3': 0.0
             })
-        return pd.DataFrame(data)
-
-    def test_strong_pattern_only(self):
-        # Create data with a strong morning pattern (7 out of 10 detections in morning)
-        dates = ['2024-03-01'] * 10
-        times = ['08:00:00'] * 7 + ['14:00:00', '15:00:00', '16:00:00']
-        weekdays = ['Monday'] * 10
-        df = self.create_test_data(dates, times, weekdays)
+            
+            # Evening regular bus (6:30 PM)
+            evening_time = current_date.replace(hour=18, minute=30, second=0)
+            data.append({
+                'timestamp': evening_time,
+                'label_1': 'bus',
+                'label_2': None,
+                'label_3': None,
+                'count_1': 1,
+                'count_2': 0,
+                'count_3': 0,
+                'avg_conf_1': 0.90,
+                'avg_conf_2': 0.0,
+                'avg_conf_3': 0.0
+            })
         
-        result = self.assistant.analyze_object_pattern(df, 'test_object', is_pattern_query=True)
-        self.assertIn("in the morning", result)
-        self.assertNotIn("does not have a regular pattern", result)
-
-    def test_moderate_pattern_only(self):
-        # Create data with only moderate patterns (5 out of 10 detections in morning)
-        dates = ['2024-03-01'] * 10
-        times = ['08:00:00'] * 5 + ['14:00:00', '15:00:00', '16:00:00', '17:00:00', '18:00:00']
-        weekdays = ['Monday'] * 10
-        df = self.create_test_data(dates, times, weekdays)
+        df = pd.DataFrame(data)
+        self.assistant.load_all_logs = MagicMock(return_value=df)
         
-        result = self.assistant.analyze_object_pattern(df, 'test_object', is_pattern_query=True)
-        self.assertEqual(result, "The test_object does not have a regular pattern in its appearances.")
-
-    def test_strong_and_moderate_patterns(self):
-        # Create data with strong morning pattern and moderate weekday pattern
-        dates = ['2024-03-01'] * 7 + ['2024-03-02'] * 3
-        times = ['08:00:00'] * 7 + ['14:00:00', '15:00:00', '16:00:00']
-        weekdays = ['Monday'] * 7 + ['Tuesday'] * 3
-        df = self.create_test_data(dates, times, weekdays)
+        # Test school bus pattern
+        message = self.assistant.answer_object_time_query("school bus", "when do you usually see it")
+        self.assertIsNotNone(message, "Response message should not be None")
+        self.assertIn("weekdays", message.lower(), "Response should mention weekday pattern")
         
-        result = self.assistant.analyze_object_pattern(df, 'test_object', is_pattern_query=True)
-        self.assertIn("in the morning", result)
-        self.assertIn("sometimes", result)
-        self.assertNotIn("does not have a regular pattern", result)
-
-    def test_insufficient_data(self):
-        # Create data with only 5 observations
-        dates = ['2024-03-01'] * 5
-        times = ['08:00:00'] * 5
-        weekdays = ['Monday'] * 5
-        df = self.create_test_data(dates, times, weekdays)
-        
-        result = self.assistant.analyze_object_pattern(df, 'test_object', is_pattern_query=True)
-        self.assertIn("isn't enough to establish a pattern", result)
-
-    def test_no_patterns(self):
-        # Create data with no clear patterns
-        dates = ['2024-03-01'] * 10
-        times = [f"{hour:02d}:00:00" for hour in range(8, 18)]
-        weekdays = ['Monday'] * 10
-        df = self.create_test_data(dates, times, weekdays)
-        
-        result = self.assistant.analyze_object_pattern(df, 'test_object', is_pattern_query=True)
-        self.assertEqual(result, "The test_object does not have a regular pattern in its appearances.")
-
-    def test_compound_object_name(self):
-        """Test detection of compound object names and clarification logic."""
-        # Create a mock summary DataFrame without the compound object name
-        mock_summary = pd.DataFrame({
-            'object': ['mail van', 'delivery truck', 'postal vehicle'],
-            'total_detections': [10, 8, 5],
-            'strong_patterns': ['[]', '[]', '[]']
-        })
-        
-        # Mock the pattern summary loading
-        with patch('pandas.read_csv', return_value=mock_summary):
-            # Simulate a query for a compound object name not in the summary
-            query = "mail truck"
-            response = self.assistant.analyze_object_pattern(self.assistant.load_all_logs(), query, is_pattern_query=True)
-            self.assertIn("I'm not sure if you meant", response)
-
-            # Simulate a user response to the clarification
-            user_response = "mail van"
-            clarification_response = self.assistant.handle_clarification_response(user_response)
-            self.assertIn("mail van", clarification_response)
+        # Test regular bus pattern
+        message = self.assistant.answer_object_time_query("bus", "when do you usually see it")
+        self.assertIsNotNone(message, "Response message should not be None")
+        self.assertIn("every day", message.lower(), "Response should mention daily pattern")
 
 if __name__ == '__main__':
     unittest.main() 

@@ -5,7 +5,7 @@ graph TB
     Microphone[Microphone Input]
     
     %% Core Components
-    YOLO[YOLOv8 Model]
+    CV[Computer Vision Model]
     Assistant[Detection Assistant]
     PatternAnalyzer[Pattern Analyzer]
     OpenAI[OpenAI Client]
@@ -16,16 +16,15 @@ graph TB
     
     %% Output Devices
     Display[Display Output]
-    TTS[Text-to-Speech]
     HA[Home Assistant]
     Speaker[Smart Speaker]
     
     %% Input Device Connections
-    Camera -->|Video Stream| YOLO
+    Camera -->|Video Stream| CV
     Microphone -->|Audio Input| Assistant
     
     %% Core Component Connections
-    YOLO -->|Detections| Assistant
+    CV -->|Detections| Assistant
     Assistant -->|Pattern Analysis| PatternAnalyzer
     Assistant -->|Query Processing| OpenAI
     
@@ -46,9 +45,9 @@ graph TB
     classDef output fill:#fff2cc,stroke:#333,stroke-width:2px
     
     class Camera,Microphone input
-    class YOLO,Assistant,PatternAnalyzer,OpenAI core
+    class CV,Assistant,PatternAnalyzer,OpenAI core
     class DetectionLogs,PatternSummary storage
-    class Display,TTS,HA,Speaker output
+    class Display,HA,Speaker output
 ```
 
 # System Architecture
@@ -60,7 +59,7 @@ This diagram shows the high-level architecture of the vision-aware assistant sys
 - **Microphone**: Captures voice commands and queries
 
 ## Core Components
-- **YOLOv8 Model**: Performs real-time object detection on video stream
+- **Computer Vision Model**: Performs real-time object detection on video stream
 - **Detection Assistant**: Main component that coordinates all other parts
 - **Pattern Analyzer**: Analyzes detection patterns over time
 - **OpenAI Client**: Processes natural language queries
@@ -76,7 +75,7 @@ This diagram shows the high-level architecture of the vision-aware assistant sys
 - **Smart Speaker**: Plays the assistant's spoken responses
 
 ## Key Interactions
-1. Camera feeds video to YOLOv8 for detection
+1. Camera feeds video to Computer Vision for detection
 2. Detections are logged and analyzed for patterns
 3. Voice commands are processed by the Assistant
 4. Responses are converted to speech via Home Assistant and played on the Smart Speaker

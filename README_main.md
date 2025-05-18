@@ -63,39 +63,21 @@ graph TB
 vision-assistant/
 ├── src/                    # Source code
 │   ├── core/              # Core functionality
-│   │   ├── assistant.py   # Main detection and voice assistant
-│   │   ├── voice_loop.py  # Voice interaction loop
-│   │   ├── openai_assistant.py  # OpenAI integration
-│   │   ├── camera.py      # Camera initialization and frame capture
-│   │   └── tts.py        # Text-to-speech utilities
-│   ├── models/            # ML models
-│   │   ├── yolov8_model.py
-│   │   └── base_model.py
 │   ├── utils/             # Utility functions
-│   │   ├── audio.py      # Audio device handling
-│   │   ├── combine_logs.py
-│   │   └── openai_utils.py
-│   └── config/            # Configuration
-│       └── settings.py
-├── data/                  # Data directory (not in git)
-│   ├── raw/              # Raw detection logs
-│   └── processed/        # Processed detection logs (combined logs, pattern summaries)
+│   ├── models/            # ML models
+│   ├── config/            # Configuration
+│   └── main.py           # Main entry point
+├── data/                  # Data directory
 ├── docs/                  # Documentation
-│   ├── reports/          # Project reports (not in git)
-│   ├── data_setup.md     # Data setup guide
-│   ├── windows_setup.md  # Windows setup guide
-│   └── home_assistant_setup.md  # Home Assistant setup guide
-├── models/               # Model weights (not in git)
+├── models/               # Model weights
 │   └── yolov8/          # YOLOv8 weights
 ├── tools/               # Utility scripts
-│   └── generate_fake_logs.py
-├── setup.py               # Project setup and installation script
-├── run_assistant.py       # Main script to run the assistant
-├── tests/                 # Test files and test data
-├── .gitignore             # Git ignore rules
-├── openai_cache.json      # Cache for OpenAI API responses
-├── yolov8n.pt             # YOLOv8 model weights
-└── requirements.txt       # Python dependencies
+├── tests/               # Test files
+├── logs/                # Application logs
+├── code_compare/        # Code comparison tools
+├── setup.py            # Project setup
+├── README_main.md      # Main documentation
+└── requirements.txt     # Python dependencies
 ```
 
 ## Setup
@@ -170,7 +152,7 @@ vision-assistant/
 To run the assistant, navigate to the project root directory (where the `src` folder is located) and use the following command:
 
 ```bash
-python -m src.core.assistant
+python -m src.main
 ```
 
 This will start the assistant, which handles microphone initialization, error handling, and cleanup automatically.
@@ -366,7 +348,7 @@ See `docs/computer_vision.md` for detailed implementation guide and examples.
 1. Start Home Assistant and ensure the TTS service is available.
 2. Run the main assistant script:
    ```bash
-   python -m src.core.voice_loop
+   python -m src.main
    ```
 3. Interact via microphone and listen for responses on your Home Assistant speaker.
 
@@ -399,7 +381,7 @@ To test the assistant:
 
 2. Run the assistant:
 ```bash
-python run_assistant.py
+python -m src.main
 ```
 
 3. Try questions from the test questions file, starting with basic queries and progressing to more complex ones.
@@ -541,11 +523,3 @@ data/
 
 ### Data Storage
 - Raw detection logs are stored in `data/raw/`
-- Processed detection logs (combined logs, pattern summaries) are stored in `data/processed/`
-- All data directories are preserved in Git but their contents are ignored
-- Use the data generator to create test data locally
-
-### Data Cleanup
-- The system automatically manages data storage
-- Old logs are automatically combined and processed
-- No manual data cleanup is required 

@@ -13,7 +13,7 @@ import numpy as np
 # Common objects and their variations
 OBJECTS = {
     'person': ['person', 'man', 'woman', 'child', 'boy', 'girl'],
-    'vehicle': ['car', 'truck', 'bus', 'school bus', 'mail truck', 'van'],
+    'vehicle': ['car', 'truck', 'bus', 'mail truck', 'van'],
     'animal': ['dog', 'cat', 'bird', 'squirrel', 'raccoon', 'rabbit'],
     'furniture': ['chair', 'table', 'desk', 'couch', 'bed'],
     'electronics': ['laptop', 'phone', 'tv', 'monitor', 'keyboard'],
@@ -47,7 +47,45 @@ def generate_timestamps(start_date, end_date, num_detections):
 
 def generate_detection_row(timestamp, objects):
     """Generate a single row of detection data."""
-    # Select 3 random objects
+    # Check if it's a weekday during school hours
+    is_weekday = timestamp.weekday() < 5  # 0-4 are weekdays
+    is_morning = 7 <= timestamp.hour <= 8  # 7-8 AM
+    is_afternoon = 14 <= timestamp.hour <= 15  # 2-3 PM
+    
+    # If it's a weekday during school hours, increase chance of bus
+    if is_weekday and (is_morning or is_afternoon):
+        if random.random() < 0.5:  # 50% chance of bus during school hours
+            row = {
+                'timestamp': timestamp,
+                'label_1': 'bus',
+                'count_1': random.randint(1, 2),
+                'avg_conf_1': round(random.uniform(0.8, 0.95), 3),
+                'label_2': random.choice(objects['person']),
+                'count_2': random.randint(1, 3),
+                'avg_conf_2': round(random.uniform(0.7, 0.9), 3),
+                'label_3': '',
+                'count_3': 0,
+                'avg_conf_3': 0.0
+            }
+            return row
+    
+    # Add chance for regular bus detection
+    if random.random() < 0.2:  # 20% chance of regular bus
+        row = {
+            'timestamp': timestamp,
+            'label_1': 'bus',
+            'count_1': random.randint(1, 2),
+            'avg_conf_1': round(random.uniform(0.7, 0.9), 3),
+            'label_2': random.choice(objects['person']),
+            'count_2': random.randint(1, 3),
+            'avg_conf_2': round(random.uniform(0.6, 0.8), 3),
+            'label_3': '',
+            'count_3': 0,
+            'avg_conf_3': 0.0
+        }
+        return row
+    
+    # Regular detection generation
     selected_objects = random.sample(list(objects.keys()), min(3, len(objects)))
     
     # Generate counts and confidences
