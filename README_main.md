@@ -74,7 +74,6 @@ vision-assistant/
 ├── tools/               # Utility scripts
 ├── tests/               # Test files
 ├── logs/                # Application logs
-├── code_compare/        # Code comparison tools
 ├── setup.py            # Project setup
 ├── README_main.md      # Main documentation
 └── requirements.txt     # Python dependencies
